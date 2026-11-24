@@ -25,12 +25,12 @@ import (
 )
 
 const (
-	exitOK            = 0
-	exitConfig        = 1
-	exitNetwork       = 2
-	exitUnsupported   = 3
-	exitBlocked       = 4
-	exitGeneric       = 5
+	exitOK          = 0
+	exitConfig      = 1
+	exitNetwork     = 2
+	exitUnsupported = 3
+	exitBlocked     = 4
+	exitGeneric     = 5
 )
 
 func main() {
@@ -67,7 +67,7 @@ func main() {
 		os.Exit(exitConfig)
 	}
 
-	sink := solver.DiscardSink{}
+	var sink solver.Sink = solver.DiscardSink{}
 	if *verbose || *debugDir != "" {
 		sink = newVerboseSink(os.Stderr, *debugDir)
 	}

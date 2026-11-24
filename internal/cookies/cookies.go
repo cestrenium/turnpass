@@ -172,7 +172,7 @@ func domainMatches(host, domain string) bool {
 }
 
 // pathMatches implements RFC 6265 section 5.1.4 path matching.
-func pathMatches(requestPath, cookiePath string) string bool {
+func pathMatches(requestPath, cookiePath string) bool {
 	if requestPath == cookiePath {
 		return true
 	}

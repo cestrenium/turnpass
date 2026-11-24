@@ -11,19 +11,19 @@ import (
 
 	"github.com/cestrenium/turnpass/api/handlers"
 	"github.com/cestrenium/turnpass/api/middleware"
-		"github.com/cestrenium/turnpass/api/sessions"
+	"github.com/cestrenium/turnpass/api/sessions"
 	"github.com/cestrenium/turnpass/api/types"
 )
 
 // Config holds the server configuration.
 type Config struct {
-	Addr               string        // host:port
-	ReadTimeout        time.Duration
-	WriteTimeout       time.Duration
-	IdleTimeout        time.Duration
-	RequestTimeout     time.Duration
-	SessionDefaultTTL  time.Duration
-	Version            string
+	Addr              string // host:port
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+	RequestTimeout    time.Duration
+	SessionDefaultTTL time.Duration
+	Version           string
 }
 
 // Server is the turnpass-x HTTP server.

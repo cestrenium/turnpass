@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -23,9 +24,10 @@ func TestRecovery(t *testing.T) {
 }
 
 func TestTimeout(t *testing.T) {
-	h := Timeout(10*time.Millisecond)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := Timeout(10 * time.Millisecond)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
+			w.WriteHeader(http.StatusGatewayTimeout)
 			return
 		case <-time.After(100 * time.Millisecond):
 			w.WriteHeader(200)

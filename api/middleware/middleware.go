@@ -62,4 +62,4 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	w.WriteHeader(code)
 	body, _ := json.Marshal(map[string]string{"status": "error", "message": msg})
 	fmt.Fprintln(w, string(body))
-})
+}

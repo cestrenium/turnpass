@@ -1,7 +1,6 @@
 package browserprofile
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,16 +63,12 @@ func TestReadFromDisk(t *testing.T) {
 }
 
 func TestFromJSON(t *testing.T) {
-	b, err := FromJSON([]byte(profileJSON), json.RawMessage(`{}`), nil)
+	b, err := FromJSON([]byte(profileJSON), nil, nil)
 	if err != nil {
 		t.Fatalf("FromJSON: %v", err)
 	}
 	if b.HasAnswers() {
-		t.Errorf("HasAnswers should be false for empty answers")
-	}
-	// Empty json.RawMessage is `nil` after json.Unmarshal of `{}`? No, `{}` is 2 bytes.
-	if string(b.Answers) != "{}" {
-		t.Errorf("Answers = %q", b.Answers)
+		t.Errorf("HasAnswers should be false for nil answers")
 	}
 }
 

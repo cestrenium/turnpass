@@ -153,7 +153,6 @@ func clientHelloID(engine fingerprint.Engine, profile string) utls.ClientHelloID
 }
 
 func buildTransport(cfg Config, helloID utls.ClientHelloID) (*http.Transport, error) {
-	fp := cfg.Fingerprint
 	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 
 	// Build the proxy URL if any.
@@ -324,10 +323,10 @@ func (a netHTTPJarAdapter) Cookies(u *url.URL) []*http.Cookie {
 // ResponseSummary is a trimmed view of an HTTP response used by the solver
 // and the FlareSolverr API.
 type ResponseSummary struct {
-	Status     int
-	URL        string
-	Headers    http.Header
-	Body       []byte
+	Status  int
+	URL     string
+	Headers http.Header
+	Body    []byte
 }
 
 // ReadBody reads and closes the response body, returning the bytes.
