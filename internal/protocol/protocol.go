@@ -44,13 +44,13 @@ func (k ChallengeKind) String() string {
 
 // Page is a parsed HTTP response body with its metadata.
 type Page struct {
-	URL         string
-	Status      int
-	Headers     http.Header
-	HTML        string
-	Title       string
-	Challenge   ChallengeKind
-	Widgets     []Widget
+	URL       string
+	Status    int
+	Headers   http.Header
+	HTML      string
+	Title     string
+	Challenge ChallengeKind
+	Widgets   []Widget
 }
 
 // Widget is a discovered Turnstile widget.
@@ -62,23 +62,23 @@ type Widget struct {
 
 var (
 	// cf challenge page markers
-	rxJustAMoment    = regexp.MustCompile(`(?i)<title>\s*(Just a moment|Checking your browser)`) //nolint:gochecknoglobals
-	rxChlBypass      = regexp.MustCompile(`(?i)cf-chl-bypass`)                                      //nolint:gochecknoglobals
-	rxChallengeForm  = regexp.MustCompile(`(?i)id\s*=\s*["']challenge-form|name\s*=\s*["']cf-chl`) //nolint:gochecknoglobals
-	rxChlManaged     = regexp.MustCompile(`(?i)cf-mitigated|cf-turnstile-challenge|managed_chl`)    //nolint:gochecknoglobals
+	rxJustAMoment   = regexp.MustCompile(`(?i)<title>\s*(Just a moment|Checking your browser)`)   //nolint:gochecknoglobals
+	rxChlBypass     = regexp.MustCompile(`(?i)cf-chl-bypass`)                                     //nolint:gochecknoglobals
+	rxChallengeForm = regexp.MustCompile(`(?i)id\s*=\s*["']challenge-form|name\s*=\s*["']cf-chl`) //nolint:gochecknoglobals
+	rxChlManaged    = regexp.MustCompile(`(?i)cf-mitigated|cf-turnstile-challenge|managed_chl`)   //nolint:gochecknoglobals
 
 	// turnstile widget markers
-	rxTurnstileDiv  = regexp.MustCompile(`(?i)<div[^>]*class\s*=\s*["'][^"']*\bcf-turnstile\b[^"']*["']`)     //nolint:gochecknoglobals
+	rxTurnstileDiv    = regexp.MustCompile(`(?i)<div[^>]*class\s*=\s*["'][^"']*\bcf-turnstile\b[^"']*["']`)     //nolint:gochecknoglobals
 	rxTurnstileScript = regexp.MustCompile(`(?i)https?://challenges\.cloudflare\.com/turnstile/v[0-9]/api\.js`) //nolint:gochecknoglobals
 
 	// sitekey extraction (data-sitekey or turnstile.render call)
-	rxDataSitekey = regexp.MustCompile(`(?i)data-sitekey\s*=\s*["']([0-9A-Za-z_x-]+)["']`)                  //nolint:gochecknoglobals
-	rxRenderCall  = regexp.MustCompile(`(?i)turnstile\.render\s*\(\s*[^,]*,\s*\{`)                       //nolint:gochecknoglobals
-	rxSitekeyProp = regexp.MustCompile(`(?i)sitekey\s*:\s*["']([0-9A-Za-z_x-]+)["']`)                     //nolint:gochecknoglobals
-	rxActionProp  = regexp.MustCompile(`(?i)action\s*:\s*["']([^"']*)["']`)                              //nolint:gochecknoglobals
-	rxCDataProp   = regexp.MustCompile(`(?i)cdata\s*:\s*["']([^"']*)["']`)                                //nolint:gochecknoglobals
-	rxTurnstileTokenField = regexp.MustCompile(`(?i)name\s*=\s*["']cf-turnstile-response["']`)            //nolint:gochecknoglobals
-	rxMetaRefresh  = regexp.MustCompile(`(?i)<meta[^>]+http-equiv\s*=\s*["']refresh["'][^>]+content\s*=\s*["'][^"']*\d+\s*;\s*url=([^"']+)["']`) //nolint:gochecknoglobals
+	rxDataSitekey         = regexp.MustCompile(`(?i)data-sitekey\s*=\s*["']([0-9A-Za-z_x-]+)["']`)                                                      //nolint:gochecknoglobals
+	rxRenderCall          = regexp.MustCompile(`(?i)turnstile\.render\s*\(\s*[^,]*,\s*\{`)                                                              //nolint:gochecknoglobals
+	rxSitekeyProp         = regexp.MustCompile(`(?i)sitekey\s*:\s*["']([0-9A-Za-z_x-]+)["']`)                                                           //nolint:gochecknoglobals
+	rxActionProp          = regexp.MustCompile(`(?i)action\s*:\s*["']([^"']*)["']`)                                                                     //nolint:gochecknoglobals
+	rxCDataProp           = regexp.MustCompile(`(?i)cdata\s*:\s*["']([^"']*)["']`)                                                                      //nolint:gochecknoglobals
+	rxTurnstileTokenField = regexp.MustCompile(`(?i)name\s*=\s*["']cf-turnstile-response["']`)                                                          //nolint:gochecknoglobals
+	rxMetaRefresh         = regexp.MustCompile(`(?i)<meta[^>]+http-equiv\s*=\s*["']refresh["'][^>]+content\s*=\s*["'][^"']*\d+\s*;\s*url=([^"']+)["']`) //nolint:gochecknoglobals
 )
 
 var rxTitle = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`) //nolint:gochecknoglobals
@@ -107,9 +107,9 @@ func ParsePage(resp *http.Response, finalURL string) (*Page, error) {
 // ParseHTMLBytes builds a Page from already-fetched HTML.
 func ParseHTMLBytes(html []byte, status int, finalURL string) *Page {
 	p := &Page{
-		URL:    finalURL,
-		Status: status,
-		HTML:   string(html),
+		URL:     finalURL,
+		Status:  status,
+		HTML:    string(html),
 		Headers: http.Header{},
 	}
 	p.Title = extractTitle(p.HTML)

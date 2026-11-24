@@ -36,14 +36,14 @@ const (
 // Outcome is the result of a unified Solve call.
 type Outcome struct {
 	Kind      OutcomeKind
-	Token     string     // set when Kind == OutcomeToken
-	Clearance Clearance  // set when Kind == OutcomeCleared
+	Token     string    // set when Kind == OutcomeToken
+	Clearance Clearance // set when Kind == OutcomeCleared
 }
 
 // Clearance holds the result of clearing a Cloudflare challenge.
 type Clearance struct {
-	Clearance string    // the cf_clearance cookie value
-	Cookies   []string  // "name=value" strings for all cookies for the page
+	Clearance string   // the cf_clearance cookie value
+	Cookies   []string // "name=value" strings for all cookies for the page
 	Page      *FetchedPage
 }
 
@@ -77,11 +77,11 @@ type Turnstile struct {
 
 // FetchedPage is a challenge page fetched by the caller.
 type FetchedPage struct {
-	URL          string
-	Status       int
-	HTML         string
+	URL            string
+	Status         int
+	HTML           string
 	ReferrerPolicy string
-	SetCookies   []string
+	SetCookies     []string
 }
 
 // Options configures one solve.
@@ -89,7 +89,7 @@ type Options struct {
 	Proxy       string
 	TrustedRoot []byte
 	Timeout     time.Duration
-	Sink       Sink
+	Sink        Sink
 }
 
 // Sink receives progress messages and artifacts during a solve.
@@ -101,7 +101,7 @@ type Sink interface {
 // DiscardSink ignores everything.
 type DiscardSink struct{}
 
-func (DiscardSink) Progress(string)             {}
+func (DiscardSink) Progress(string)               {}
 func (DiscardSink) Artifact(string, []byte) error { return nil }
 
 // Solver solves Turnstile widgets and clears Cloudflare challenge pages.
