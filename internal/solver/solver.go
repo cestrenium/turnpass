@@ -164,13 +164,33 @@ func (s *Solver) SolveTurnstile(ctx context.Context, req Turnstile, opts Options
 
 	sink.Progress(fmt.Sprintf("widget sitekey=%s action=%q cdata=%q", widget.Sitekey, widget.Action, widget.CData))
 
+	// Perform the HTTP orchestration: fetch the loader script, build and
+	// fetch the iframe, extract inline JavaScript. This is everything before
+	// the challenge-program VM runs.
+	orchResult, err := s.orchestrate(ctx, client, req.URL, page.HTML, page.Status, widget, sink)
+	if err != nil {
+		return "", err
+	}
+
+	// Save orchestration artifacts for debugging.
+	if orchResult.IframeJS != "" {
+		sink.Artifact("iframe.js", []byte(orchResult.IframeJS))
+	}
+	if orchResult.LoaderScript != "" {
+		sink.Artifact("loader.js", []byte(orchResult.LoaderScript))
+	}
+	if orchResult.OrchestratorScript != "" {
+		sink.Artifact("orchestrator.js", []byte(orchResult.OrchestratorScript))
+	}
+
 	// The challenge-program VM (the obfuscated JS interpreter that produces
 	// the probe answers Cloudflare expects) is the largest single piece of
 	// cfsolve and is being ported incrementally. Until it is complete, we
 	// cannot execute the live challenge program. We surface this honestly.
 	return "", tperr.NewUnsupported(fmt.Errorf(
 		"turnstile token acquisition requires the challenge-program VM, " +
-			"which is not yet ported; see KNOWN_LIMITATIONS.md on the docs branch"))
+			"which is not yet ported; HTTP orchestration completed successfully " +
+			"(loader, iframe, and inline JS fetched); see KNOWN_LIMITATIONS.md on the docs branch"))
 }
 
 // Clear navigates to the page and clears the Cloudflare challenge.
@@ -219,13 +239,32 @@ func (s *Solver) clearFrom(ctx context.Context, pageURL string, opts Options, fe
 
 	sink.Progress(fmt.Sprintf("detected %s challenge at %s (status %d)", page.Challenge, u, page.Status))
 
+	// Perform the HTTP orchestration: parse the challenge page, fetch the
+	// orchestrator script, fetch the loader, build and fetch the iframe.
+	orchResult, err := s.orchestrate(ctx, client, pageURL, page.HTML, page.Status, nil, sink)
+	if err != nil {
+		return Clearance{}, err
+	}
+
+	// Save orchestration artifacts for debugging.
+	if orchResult.OrchestratorScript != "" {
+		sink.Artifact("orchestrator.js", []byte(orchResult.OrchestratorScript))
+	}
+	if orchResult.IframeJS != "" {
+		sink.Artifact("iframe.js", []byte(orchResult.IframeJS))
+	}
+	if orchResult.LoaderScript != "" {
+		sink.Artifact("loader.js", []byte(orchResult.LoaderScript))
+	}
+
 	// As above, the browser-check program VM is not yet ported. We cannot
 	// produce the proof payload Cloudflare requires, so we surface this
 	// honestly rather than fabricating a clearance cookie.
 	_ = page
 	return Clearance{}, tperr.NewUnsupported(fmt.Errorf(
 		"challenge clearance requires the challenge-program VM, " +
-			"which is not yet ported; see KNOWN_LIMITATIONS.md on the docs branch"))
+			"which is not yet ported; HTTP orchestration completed successfully " +
+			"(orchestrator, loader, iframe, and inline JS fetched); see KNOWN_LIMITATIONS.md on the docs branch"))
 }
 
 // Solve navigates to the page, then clears a challenge or solves the page's

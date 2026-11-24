@@ -210,13 +210,22 @@ func buildTransport(cfg Config, helloID utls.ClientHelloID) (*http.Transport, er
 			conn.Close()
 			return nil, fmt.Errorf("uTLS handshake: %w", err)
 		}
-		return uConn, nil
+		// Wrap the uTLS connection so Go's http.Transport can detect HTTP/2
+		// via ALPN. The transport checks for *tls.Conn or a ConnectionStater
+		// interface; utls.UConn satisfies neither, so we wrap it.
+		return &utlsConnWrapper{uConn: uConn}, nil
 	}
 
 	// For non-TLS (plain HTTP) requests, honour the proxy too.
 	if proxyURL != nil {
 		t.Proxy = http.ProxyURL(proxyURL)
 	}
+
+	// Go's built-in HTTP/2 support (enabled by ForceAttemptHTTP2 above)
+	// detects HTTP/2 by checking the ALPN protocol on the TLS connection.
+	// Our utlsConnWrapper implements ConnectionState() tls.ConnectionState
+	// which the transport uses for this check. No explicit http2.ConfigureTransport
+	// is needed; the built-in support handles it.
 
 	return t, nil
 }
