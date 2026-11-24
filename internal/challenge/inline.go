@@ -121,7 +121,7 @@ type IframeParams struct {
 // BuildIframeURL constructs the Turnstile iframe URL from the loader origin
 // and widget parameters. The URL format follows cfsolve's extra_params::iframe_url:
 //
-	{origin}/cdn-cgi/challenge-platform/h/{route}/turnstile/f/av0/rch/{widget_id}/{sitekey}/{theme}/{size}/{feedback}/new/{...}?lang={language}
+//	{origin}/cdn-cgi/challenge-platform/h/{route}/turnstile/f/av0/rch/{widget_id}/{sitekey}/{theme}/{size}/{feedback}/new/{...}?lang={language}
 func BuildIframeURL(loaderURL string, route string, params IframeParams) (string, error) {
 	parsed, err := url.Parse(loaderURL)
 	if err != nil {
