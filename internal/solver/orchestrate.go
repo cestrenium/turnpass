@@ -46,6 +46,10 @@ type OrchestrationResult struct {
 	// IframeJS is the inline JavaScript extracted from the iframe.
 	IframeJS string
 
+	// InitialRequest is the POST URL and cf-chl token extracted from the
+	// iframe's inline JavaScript. Set when IframeJS is non-empty.
+	InitialRequest *challenge.InitialRequest
+
 	// Widget is the Turnstile widget being solved.
 	Widget *Widget
 }
@@ -170,6 +174,16 @@ func (s *Solver) orchestrate(ctx context.Context, client *transport.BrowserClien
 			result.IframeJS = iframeJS
 			if iframeJS != "" {
 				sink.Progress(fmt.Sprintf("iframe inline JS: %d bytes", len(iframeJS)))
+
+				// Extract the POST URL and cf-chl token from the iframe JS.
+				initReq, err := challenge.ExtractInitialRequest(iframeJS, iframeURL)
+				if err != nil {
+					sink.Progress(fmt.Sprintf("warning: could not extract initial request: %v", err))
+				} else {
+					result.InitialRequest = initReq
+					sink.Progress(fmt.Sprintf("POST URL: %s", initReq.URL))
+					sink.Progress(fmt.Sprintf("cf-chl token: %s (ray: %s)", initReq.CfChl, initReq.Ray))
+				}
 			} else {
 				sink.Progress("warning: no inline JavaScript found in iframe")
 			}
