@@ -12,25 +12,25 @@ import (
 
 // Request is the top-level FlareSolverr API request.
 type Request struct {
-	Cmd                 string            `json:"cmd"`
-	URL                 string            `json:"url,omitempty"`
-	Session             string            `json:"session,omitempty"`
-	SessionTTLMinutes   int               `json:"session_ttl_minutes,omitempty"`
-	MaxTimeout          int               `json:"maxTimeout,omitempty"`
-	Headers             map[string]string `json:"headers,omitempty"`
-	PostData            string            `json:"postData,omitempty"`
-	Cookies             []Cookie          `json:"cookies,omitempty"`
-	ReturnOnlyCookies   bool              `json:"returnOnlyCookies,omitempty"`
-	Proxy               map[string]string `json:"proxy,omitempty"`
+	Cmd               string            `json:"cmd"`
+	URL               string            `json:"url,omitempty"`
+	Session           string            `json:"session,omitempty"`
+	SessionTTLMinutes int               `json:"session_ttl_minutes,omitempty"`
+	MaxTimeout        int               `json:"maxTimeout,omitempty"`
+	Headers           map[string]string `json:"headers,omitempty"`
+	PostData          string            `json:"postData,omitempty"`
+	Cookies           []Cookie          `json:"cookies,omitempty"`
+	ReturnOnlyCookies bool              `json:"returnOnlyCookies,omitempty"`
+	Proxy             map[string]string `json:"proxy,omitempty"`
 }
 
 // Cookie is a FlareSolverr cookie entry.
 type Cookie struct {
-	Name    string `json:"name"`
-	Value   string `json:"value"`
-	Domain  string `json:"domain,omitempty"`
-	Path    string `json:"path,omitempty"`
-	Secure  bool   `json:"secure,omitempty"`
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+	Domain   string `json:"domain,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Secure   bool   `json:"secure,omitempty"`
 	HttpOnly bool   `json:"httpOnly,omitempty"`
 }
 
@@ -47,19 +47,19 @@ type Response struct {
 
 // Solution is the solved-page payload.
 type Solution struct {
-	URL     string    `json:"url"`
-	Status  int       `json:"status"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Response *SolutionResponse `json:"response,omitempty"`
-	Cookies []Cookie  `json:"cookies"`
-	UserAgent string   `json:"userAgent"`
-	HTML    string    `json:"html"`
+	URL       string            `json:"url"`
+	Status    int               `json:"status"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Response  *SolutionResponse `json:"response,omitempty"`
+	Cookies   []Cookie          `json:"cookies"`
+	UserAgent string            `json:"userAgent"`
+	HTML      string            `json:"html"`
 }
 
 // SolutionResponse is the response sub-object (kept for upstream compat).
 type SolutionResponse struct {
-	URL    string `json:"url"`
-	Status int    `json:"status"`
+	URL     string            `json:"url"`
+	Status  int               `json:"status"`
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
@@ -78,10 +78,10 @@ func (r *Response) Marshal() ([]byte, error) { return json.Marshal(r) }
 // NewOK returns a Response with status=ok and the given message.
 func NewOK(msg, version, session string, sol *Solution) Response {
 	return Response{
-		Status:  StatusOK,
-		Message: msg,
-		Version: version,
-		Session: session,
+		Status:   StatusOK,
+		Message:  msg,
+		Version:  version,
+		Session:  session,
 		Solution: sol,
 	}
 }

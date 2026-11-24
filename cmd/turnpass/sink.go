@@ -14,9 +14,9 @@ import (
 // verboseSink writes progress to stderr and (optionally) saves artifacts to
 // a directory. It is safe for concurrent use.
 type verboseSink struct {
-	w       io.Writer
+	w        io.Writer
 	debugDir string
-	mu      sync.Mutex
+	mu       sync.Mutex
 }
 
 func newVerboseSink(w io.Writer, debugDir string) *verboseSink {

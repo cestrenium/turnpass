@@ -18,16 +18,16 @@ const DefaultTTL = 15
 
 // Session is a single named session with its own cookie jar.
 type Session struct {
-	ID       string
-	Cookies  *cookies.Jar
-	Expires  time.Time
-	Created  time.Time
+	ID      string
+	Cookies *cookies.Jar
+	Expires time.Time
+	Created time.Time
 }
 
 // Store manages sessions in memory.
 type Store struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session
+	mu         sync.RWMutex
+	sessions   map[string]*Session
 	defaultTTL time.Duration
 }
 

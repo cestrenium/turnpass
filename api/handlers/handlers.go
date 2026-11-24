@@ -19,10 +19,10 @@ import (
 
 // Dispatcher routes FlareSolverr commands to handlers.
 type Dispatcher struct {
-	Store    *sessions.Store
-	Solver   *solver.Solver
-	Version  string
-	Timeout  time.Duration
+	Store   *sessions.Store
+	Solver  *solver.Solver
+	Version string
+	Timeout time.Duration
 }
 
 // NewDispatcher returns a Dispatcher.
@@ -161,9 +161,9 @@ func (d *Dispatcher) handleSessionList() types.Response {
 	}
 	b, _ := json.Marshal(ids)
 	return types.Response{
-		Status:  types.StatusOK,
-		Message: "Session list retrieved.",
-		Version: d.Version,
+		Status:   types.StatusOK,
+		Message:  "Session list retrieved.",
+		Version:  d.Version,
 		Solution: &types.Solution{HTML: string(b)},
 	}
 }

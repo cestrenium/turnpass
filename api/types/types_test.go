@@ -7,10 +7,10 @@ import (
 
 func TestRequestRoundtrip(t *testing.T) {
 	req := Request{
-		Cmd:       "request.get",
-		URL:       "https://example.com/",
+		Cmd:        "request.get",
+		URL:        "https://example.com/",
 		MaxTimeout: 60000,
-		Session:   "s1",
+		Session:    "s1",
 	}
 	b, err := json.Marshal(req)
 	if err != nil {

@@ -28,17 +28,17 @@ const (
 
 // Fingerprint is the parsed profile file.
 type Fingerprint struct {
-	Engine         Engine           `json:"engine"`
-	Transport      TransportSection `json:"transport"`
-	Browser        Layout           `json:"browser"`
-	Timeline       json.RawMessage  `json:"timeline"`
-	Intervals      json.RawMessage  `json:"intervals"`
-	Orchestrator   json.RawMessage  `json:"orchestrator"`
-	ResourceTiming json.RawMessage  `json:"resource_timing"`
-	Interaction    json.RawMessage  `json:"interaction"`
-	Second         json.RawMessage  `json:"second"`
-	Answers              string `json:"answers,omitempty"`
-	ChallengePageAnswers string `json:"challenge_page_answers,omitempty"`
+	Engine               Engine           `json:"engine"`
+	Transport            TransportSection `json:"transport"`
+	Browser              Layout           `json:"browser"`
+	Timeline             json.RawMessage  `json:"timeline"`
+	Intervals            json.RawMessage  `json:"intervals"`
+	Orchestrator         json.RawMessage  `json:"orchestrator"`
+	ResourceTiming       json.RawMessage  `json:"resource_timing"`
+	Interaction          json.RawMessage  `json:"interaction"`
+	Second               json.RawMessage  `json:"second"`
+	Answers              string           `json:"answers,omitempty"`
+	ChallengePageAnswers string           `json:"challenge_page_answers,omitempty"`
 }
 
 // TransportSection is the fingerprint's transport block.
@@ -57,9 +57,9 @@ type Requests struct {
 
 // Layout is the browser page layout block.
 type Layout struct {
-	InnerWidth  int            `json:"inner_width"`
-	InnerHeight int            `json:"inner_height"`
-	Challenge   ChallengeBox   `json:"challenge_page"`
+	InnerWidth  int          `json:"inner_width"`
+	InnerHeight int          `json:"inner_height"`
+	Challenge   ChallengeBox `json:"challenge_page"`
 	// Raw preserves unrecognised keys for forward compatibility.
 	Raw map[string]json.RawMessage `json:"-"`
 }
