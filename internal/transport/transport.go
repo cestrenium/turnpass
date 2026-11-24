@@ -102,6 +102,15 @@ func (c *BrowserClient) UserAgent() string { return c.userAgent }
 // Engine returns the browser engine.
 func (c *BrowserClient) Engine() fingerprint.Engine { return c.engine }
 
+// SetInsecureTLS configures the transport to accept any TLS certificate.
+// This is for testing only (e.g., against httptest.NewTLSServer).
+func (c *BrowserClient) SetInsecureTLS() {
+	if t, ok := c.httpClient.Transport.(*http.Transport); ok {
+		t.TLSClientConfig.InsecureSkipVerify = true
+		t.ForceAttemptHTTP2 = false
+	}
+}
+
 // Do sends req, applying the per-request-kind header order from the
 // fingerprint. kind selects which header order to use (e.g. "navigation",
 // "iframe", "script").

@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"bytes"
 	"encoding/base64"
 	"math/big"
 	"testing"
@@ -208,5 +209,139 @@ func TestRSAPadLength(t *testing.T) {
 	// Just verify the length is correct.
 	if len(result) != SeedLength {
 		t.Errorf("result length = %d, want %d", len(result), SeedLength)
+	}
+}
+
+func TestDeflateInflateRoundTrip(t *testing.T) {
+	inputs := [][]byte{
+		[]byte(""),
+		[]byte("a"),
+		[]byte("Hello, World! This is a test of DEFLATE compression."),
+		bytes.Repeat([]byte("abcabcabcabcabcabcabc"), 10),
+		bytes.Repeat([]byte("x"), 1000),
+		[]byte(`{"a":1,"b":[1,2,3],"c":{"a":1,"b":[1,2,3]}}`),
+	}
+
+	for _, input := range inputs {
+		compressed, err := Deflate(input)
+		if err != nil {
+			t.Errorf("Deflate(%d bytes): %v", len(input), err)
+			continue
+		}
+		decompressed, err := Inflate(compressed)
+		if err != nil {
+			t.Errorf("Inflate: %v", err)
+			continue
+		}
+		if !bytes.Equal(decompressed, input) {
+			t.Errorf("round-trip failed for %d bytes", len(input))
+		}
+	}
+}
+
+func TestFrameUnframeRoundTrip(t *testing.T) {
+	payloads := [][]byte{
+		[]byte(`{"small":"payload"}`),
+		bytes.Repeat([]byte(`{"key":"value","num":123}`), 20), // large enough to compress
+	}
+
+	for _, payload := range payloads {
+		frame, err := Frame(payload)
+		if err != nil {
+			t.Errorf("Frame: %v", err)
+			continue
+		}
+
+		// Pad to whole blocks.
+		blockLen := (len(frame) + BlockLength - 1) / BlockLength * BlockLength
+		padding := byte(blockLen - len(frame))
+		padded := make([]byte, blockLen)
+		copy(padded, frame)
+
+		result, err := Unframe(padded, padding)
+		if err != nil {
+			t.Errorf("Unframe: %v", err)
+			continue
+		}
+		if !bytes.Equal(result, payload) {
+			t.Errorf("round-trip failed: got %q, want %q", result, payload)
+		}
+	}
+}
+
+func TestCodecEncodeDecodeRoundTrip(t *testing.T) {
+	// Use the standard base64 alphabet for testing.
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	// Use a modulus that is exactly SeedLength bytes (1024 bits).
+	modulus := new(big.Int).Lsh(big.NewInt(1), 1023)
+	secret := [KeyLength]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+
+	c, err := NewCodec(alphabet, modulus, secret)
+	if err != nil {
+		t.Fatalf("NewCodec: %v", err)
+	}
+
+	payload := []byte(`{"test":"payload","numbers":[1,2,3],"nested":{"a":true}}`)
+
+	encoded, err := c.Encode(payload)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	// We can't fully decode without the RSA private key, but we can verify
+	// the encoded string is non-empty and decodes to the right envelope size.
+	if len(encoded) == 0 {
+		t.Error("encoded string is empty")
+	}
+
+	// Decode the envelope to verify its structure.
+	envelope, err := c.alphabet.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("decoding envelope: %v", err)
+	}
+	if len(envelope) < SeedLength+1 {
+		t.Fatalf("envelope too short: %d bytes", len(envelope))
+	}
+	padding := envelope[SeedLength]
+	if int(padding) >= BlockLength {
+		t.Errorf("padding %d >= block length %d", padding, BlockLength)
+	}
+	frame := envelope[SeedLength+1:]
+	if len(frame)%BlockLength != 0 {
+		t.Errorf("frame not whole blocks: %d bytes", len(frame))
+	}
+}
+
+func TestNewCodecBadAlphabet(t *testing.T) {
+	modulus := new(big.Int).Lsh(big.NewInt(1), 1023)
+	secret := [KeyLength]byte{}
+
+	// Too short.
+	_, err := NewCodec("ABC", modulus, secret)
+	if err == nil {
+		t.Error("expected error for short alphabet")
+	}
+
+	// Too long.
+	_, err = NewCodec("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/extra", modulus, secret)
+	if err == nil {
+		t.Error("expected error for long alphabet")
+	}
+}
+
+func TestNewCodecBadModulus(t *testing.T) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	secret := [KeyLength]byte{}
+
+	// Zero modulus.
+	_, err := NewCodec(alphabet, big.NewInt(0), secret)
+	if err == nil {
+		t.Error("expected error for zero modulus")
+	}
+
+	// Too small.
+	_, err = NewCodec(alphabet, big.NewInt(3), secret)
+	if err == nil {
+		t.Error("expected error for small modulus")
 	}
 }
