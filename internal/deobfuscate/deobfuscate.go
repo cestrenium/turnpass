@@ -3,7 +3,6 @@
 package deobfuscate
 
 import (
-	"encoding/base64"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -20,6 +19,7 @@ type Deobfuscator struct {
 	XORKeys           map[string]int64
 	StringCache       map[string]string
 	StringDecoderName string
+	StringDecoderKey  int
 }
 
 // New creates a Deobfuscator for the given source.
@@ -94,47 +94,10 @@ func (d *Deobfuscator) evalXORChain(s string) int64 {
 	return result
 }
 
-// findStringDecoder finds the name of the string decoder function.
-func (d *Deobfuscator) findStringDecoder(source string) {
-	for _, name := range []string{"aa", "a0", "a1", "a2", "a3", "a4", "a5", "ab", "ac", "ad"} {
-		if regexp.MustCompile(regexp.QuoteMeta(name) + `\(\x60`).MatchString(source) {
-			d.StringDecoderName = name
-			return
-		}
-	}
-}
-
-// decodeStringCalls finds and decodes all string decoder calls.
-func (d *Deobfuscator) decodeStringCalls(source string) string {
-	if d.StringDecoderName == "" {
-		return source
-	}
-	pattern := regexp.MustCompile(regexp.QuoteMeta(d.StringDecoderName) + `\(\x60([^\x60]+)\x60\)`)
-	return pattern.ReplaceAllStringFunc(source, func(s string) string {
-		m := pattern.FindStringSubmatch(s)
-		if len(m) < 2 {
-			return s
-		}
-		encoded := m[1]
-		if decoded, ok := d.StringCache[encoded]; ok {
-			escaped := strings.ReplaceAll(decoded, "`", "\\`")
-			return "`" + escaped + "`"
-		}
-		decoded := DecodeAaString(encoded)
-		if decoded != "" {
-			d.StringCache[encoded] = decoded
-			escaped := strings.ReplaceAll(decoded, "`", "\\`")
-			return "`" + escaped + "`"
-		}
-		return s
-	})
-}
-
 // replaceXORAccesses replaces obj[N ^ _0xKEY] with obj[resolvedN].
 func (d *Deobfuscator) replaceXORAccesses(source string) string {
 	result := source
 	for varName, keyVal := range d.XORKeys {
-		// NUMBER ^ _0xKEY
 		pattern := regexp.MustCompile(`(\d+)\s*\^\s*` + regexp.QuoteMeta(varName))
 		result = pattern.ReplaceAllStringFunc(result, func(s string) string {
 			m := pattern.FindStringSubmatch(s)
@@ -147,7 +110,6 @@ func (d *Deobfuscator) replaceXORAccesses(source string) string {
 			}
 			return strconv.FormatInt(n^keyVal, 10)
 		})
-		// _0xKEY ^ NUMBER
 		pattern2 := regexp.MustCompile(regexp.QuoteMeta(varName) + `\s*\^\s*(\d+)`)
 		result = pattern2.ReplaceAllStringFunc(result, func(s string) string {
 			m := pattern2.FindStringSubmatch(s)
@@ -162,53 +124,6 @@ func (d *Deobfuscator) replaceXORAccesses(source string) string {
 		})
 	}
 	return result
-}
-
-// DecodeAaString decodes a string using the aa()/a0() obfuscation.
-// Base64 decode, then XOR with rolling 16-bit key starting at 8185.
-func DecodeAaString(encoded string) string {
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return ""
-	}
-	key := uint16(8185)
-	var result []uint16
-	var buffer []uint16
-
-	for i := 0; i < len(decoded); {
-		key = (key<<8 | key>>8) & 0xFFFF
-		if i >= len(decoded) {
-			break
-		}
-		h := uint16(decoded[i]) ^ (key >> 8)
-		i++
-		if h == 255 {
-			key = (key<<8 | key>>8) & 0xFFFF
-			if i >= len(decoded) {
-				break
-			}
-			h = uint16(decoded[i]) ^ (key >> 8)
-			i++
-			key = (key<<8 | key>>8) & 0xFFFF
-			if i >= len(decoded) {
-				break
-			}
-			h |= (uint16(decoded[i]) ^ (key >> 8)) << 8
-			i++
-		}
-		buffer = append(buffer, h)
-		if len(buffer) == 128 {
-			result = append(result, buffer...)
-			buffer = buffer[:0]
-		}
-	}
-	result = append(result, buffer...)
-
-	runes := make([]rune, 0, len(result))
-	for _, u := range result {
-		runes = append(runes, rune(u))
-	}
-	return string(runes)
 }
 
 // DeobfuscateScript is the main entry point.
