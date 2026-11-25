@@ -69,7 +69,7 @@ func New(cfg Config) (*BrowserClient, error) {
 	}
 
 	hc := &http.Client{
-		Transport: transport,
+		Transport: &decompressTransport{base: transport},
 		Timeout:   timeout,
 		Jar:       netHTTPJarAdapter{jar},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {

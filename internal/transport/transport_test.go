@@ -72,8 +72,18 @@ func TestDoAgainstTestServer(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	// Override the http client transport to accept any cert (test-only).
-	c.httpClient.Transport.(*http.Transport).TLSClientConfig.InsecureSkipVerify = true
-	c.httpClient.Transport.(*http.Transport).ForceAttemptHTTP2 = false
+	// The transport is wrapped in a decompressTransport, so we need to
+	// access the underlying *http.Transport.
+	dt, ok := c.httpClient.Transport.(*decompressTransport)
+	if !ok {
+		t.Fatalf("expected *decompressTransport, got %T", c.httpClient.Transport)
+	}
+	baseTransport, ok := dt.base.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport as base, got %T", dt.base)
+	}
+	baseTransport.TLSClientConfig.InsecureSkipVerify = true
+	baseTransport.ForceAttemptHTTP2 = false
 
 	resp, err := c.Get(context.Background(), "navigation", srv.URL)
 	if err != nil {

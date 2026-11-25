@@ -335,6 +335,8 @@ func (s *Solver) clearFrom(ctx context.Context, pageURL string, opts Options, fe
 			)
 			if err != nil {
 				sink.Progress(fmt.Sprintf("warning: goja encoding failed: %v", err))
+			} else if encResult == nil {
+				sink.Progress("warning: goja encoding returned nil result")
 			} else if encResult.EncodedPayload != "" {
 				sink.Progress(fmt.Sprintf("goja-encoded payload: %d chars", len(encResult.EncodedPayload)))
 
@@ -351,9 +353,15 @@ func (s *Solver) clearFrom(ctx context.Context, pageURL string, opts Options, fe
 					}
 					if postResult.Status == 200 {
 						sink.Progress("orchestrator POST succeeded with HTTP 200!")
-						// TODO: execute the response VM program to get the iframe URL
 					}
 				}
+			} else {
+				encDebug := ""
+				if encResult.EncoderCallResult != "" {
+					encDebug = fmt.Sprintf(", encoderCall=%s", truncateStr(encResult.EncoderCallResult, 200))
+				}
+				sink.Progress(fmt.Sprintf("warning: goja encoding produced empty payload (keyTransform=%q, error=%v%s)",
+					encResult.KeyTransformFunction, encResult.Error, encDebug))
 			}
 		}
 

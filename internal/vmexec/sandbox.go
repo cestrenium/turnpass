@@ -106,12 +106,60 @@ func ExecuteOrchestrator(orchestratorJS, runnerName, initialProgram string, cfCh
 			}
 		}
 	}
+	// If still not found, search all window properties for the runner.
+	// The runner may be installed as a property on a global object:
+	//   br[...]._hexname = function(VAR){...}
+	// We search all object-valued window properties for a matching key.
+	if runnerVal == nil || goja.IsUndefined(runnerVal) || goja.IsNull(runnerVal) {
+		for _, key := range windowObj.Keys() {
+			val := windowObj.Get(key)
+			if val == nil || goja.IsUndefined(val) || goja.IsNull(val) {
+				continue
+			}
+			if obj := val.ToObject(vm); obj != nil {
+				if rv := obj.Get(runnerName); rv != nil && !goja.IsUndefined(rv) && !goja.IsNull(rv) {
+					runnerVal = rv
+					break
+				}
+			}
+		}
+	}
+	// Also try using goja to search (handles nested properties).
+	if runnerVal == nil || goja.IsUndefined(runnerVal) || goja.IsNull(runnerVal) {
+		searchResult, _ := vm.RunString(fmt.Sprintf(`
+                        (function() {
+                                var name = %q;
+                                // Search window and all its object properties.
+                                function search(obj, depth) {
+                                        if (!obj || depth > 2) return null;
+                                        try {
+                                                if (typeof obj[name] === 'function') return obj[name];
+                                                var keys = Object.keys(obj);
+                                                for (var i = 0; i < keys.length; i++) {
+                                                        try {
+                                                                var v = obj[keys[i]];
+                                                                if (v && typeof v === 'object') {
+                                                                        var r = search(v, depth + 1);
+                                                                        if (r) return r;
+                                                                }
+                                                        } catch(e) {}
+                                                }
+                                        } catch(e) {}
+                                        return null;
+                                }
+                                return search(window, 0);
+                        })()
+                `, runnerName))
+		if searchResult != nil && !goja.IsUndefined(searchResult) && !goja.IsNull(searchResult) {
+			runnerVal = searchResult
+		}
+	}
 	if runnerVal == nil || goja.IsUndefined(runnerVal) || goja.IsNull(runnerVal) {
 		// Runner not found — extract whatever globals were installed
 		// before the orchestrator failed.
 		extractWindowGlobals(vm, windowObj, result)
 		identifyKeyTransform(result)
-		return result, fmt.Errorf("runner %q not found on window or _cf_chl_opt", runnerName)
+		return result, fmt.Errorf("runner %q not found on window or any global object", runnerName)
 	}
 
 	// Snapshot window keys before the runner call.
@@ -131,8 +179,13 @@ func ExecuteOrchestrator(orchestratorJS, runnerName, initialProgram string, cfCh
 
 	// Call the runner with the initial program.
 	callDone := make(chan error, 1)
+	// Install the runner on window so we can call it by name.
+	// The runner may have been found on a nested object, so we set it
+	// directly on window for easy access.
+	windowObj.Set("__runner_fn", runnerVal)
+
 	go func() {
-		_, err := vm.RunString(fmt.Sprintf(`try{window.__runner_result=window.%s(%q);}catch(e){window.__runner_error=e.message+':'+e.stack;}`, runnerName, initialProgram))
+		_, err := vm.RunString(fmt.Sprintf(`try{window.__runner_result=window.__runner_fn(%q);}catch(e){window.__runner_error=e.message+':'+e.stack;}`, initialProgram))
 		callDone <- err
 	}()
 
