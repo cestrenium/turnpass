@@ -252,18 +252,18 @@ func utf16ToString(units []uint16) (string, bool) {
 	return string(runes), true
 }
 
-func Undefined() Value           { return Value{Kind: KindUndefined} }
-func Null() Value                { return Value{Kind: KindNull} }
-func BoolVal(b bool) Value       { return Value{Kind: KindBool, Bool: b} }
-func NumberVal(n float64) Value  { return Value{Kind: KindNumber, Number: n} }
-func StringVal(s string) Value   { return Value{Kind: KindString, String: NewJsString(s)} }
-func ArrayVal(e []Value) Value   { return Value{Kind: KindArray, Array: e} }
-func SymbolicVal(t Term) Value   { return Value{Kind: KindSymbolic, Term: &t} }
-func MachineVal() Value          { return Value{Kind: KindMachine} }
-func RegistersVal() Value        { return Value{Kind: KindRegisters} }
-func ProgramVal() Value          { return Value{Kind: KindProgram} }
-func CellsVal() Value            { return Value{Kind: KindCells} }
-func CellVal(i uint32) Value     { return Value{Kind: KindCell, CellIndex: i} }
+func Undefined() Value            { return Value{Kind: KindUndefined} }
+func Null() Value                 { return Value{Kind: KindNull} }
+func BoolVal(b bool) Value        { return Value{Kind: KindBool, Bool: b} }
+func NumberVal(n float64) Value   { return Value{Kind: KindNumber, Number: n} }
+func StringVal(s string) Value    { return Value{Kind: KindString, String: NewJsString(s)} }
+func ArrayVal(e []Value) Value    { return Value{Kind: KindArray, Array: e} }
+func SymbolicVal(t Term) Value    { return Value{Kind: KindSymbolic, Term: &t} }
+func MachineVal() Value           { return Value{Kind: KindMachine} }
+func RegistersVal() Value         { return Value{Kind: KindRegisters} }
+func ProgramVal() Value           { return Value{Kind: KindProgram} }
+func CellsVal() Value             { return Value{Kind: KindCells} }
+func CellVal(i uint32) Value      { return Value{Kind: KindCell, CellIndex: i} }
 func NamespaceVal(p string) Value { return Value{Kind: KindNamespace, Namespace: p} }
 
 func (v Value) IsImmutable() bool {
@@ -308,4 +308,28 @@ func (v Value) AsString() (JsString, bool) {
 		return v.String, true
 	}
 	return JsString{}, false
+}
+
+// FunctionVal creates a function value from a Callable.
+func FunctionVal(c Callable) Value {
+	return Value{Kind: KindFunction, Callable: &c}
+}
+
+// toFloat64 converts an interface{} (from goja's NumberLiteral.Value) to float64.
+// Goja uses int64 for integer literals and float64 for floating-point literals.
+func toFloat64(v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case int:
+		return float64(n)
+	case int32:
+		return float64(n)
+	default:
+		return 0
+	}
 }

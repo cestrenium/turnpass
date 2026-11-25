@@ -15,6 +15,8 @@ const (
 	MemberKeyIndex
 	MemberValues
 	MemberTags
+	MemberProgram
+	MemberRegisters
 )
 
 func MemberOf(name string) Member {
