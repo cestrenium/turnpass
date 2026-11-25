@@ -15,14 +15,15 @@ type StringDecoder struct {
 }
 
 // FindAllStringDecoders finds all string decoder functions in the source.
-// Each decoder has the pattern: NAME=(function(PARAM){...s=KEY...})
-// The parameter name can be any identifier, not just 'n'.
+// The decoder pattern is: NAME=(function(PARAM){...KEYVAR=NUMBER...atob...})
+// The key variable name and value vary by build.
 func FindAllStringDecoders(source string) []StringDecoder {
 	var decoders []StringDecoder
 
-	// Pattern: NAME=(function(PARAM){...s=NUMBER...})
-	// The function body contains the rolling XOR key assignment.
-	rx := regexp.MustCompile(`(\w+)=\(function\(\w+\)\{[^}]*?(\w+)=(\d+)[^}]*atob`)
+	// Pattern: NAME=(function(PARAM){...atob(...),VAR=NUMBER...})
+	// The VAR=NUMBER is the initial XOR key, which varies by build.
+	// We use a more flexible regex that handles nested braces.
+	rx := regexp.MustCompile(`(\w+)=\(function\(\w+\)\{.{0,500}?atob\(\w+\),(\w+)=(\d+)`)
 	for _, m := range rx.FindAllStringSubmatch(source, -1) {
 		if len(m) >= 4 {
 			name := m[1]
@@ -30,14 +31,13 @@ func FindAllStringDecoders(source string) []StringDecoder {
 			if err != nil {
 				continue
 			}
-			// Check if this name is used with backtick string calls.
 			if regexp.MustCompile(regexp.QuoteMeta(name) + `\(\x60`).MatchString(source) {
 				decoders = append(decoders, StringDecoder{Name: name, Key: key})
 			}
 		}
 	}
 
-	// Also check for known decoder names with default keys.
+	// Fallback: check for known decoder names with hardcoded keys.
 	for _, name := range []string{"aa", "a0", "b0"} {
 		found := false
 		for _, d := range decoders {
@@ -47,16 +47,7 @@ func FindAllStringDecoders(source string) []StringDecoder {
 			}
 		}
 		if !found && regexp.MustCompile(regexp.QuoteMeta(name)+`\(\x60`).MatchString(source) {
-			// Try to find the key from the source.
-			keyRX := regexp.MustCompile(regexp.QuoteMeta(name) + `=\(function\(\w+\)\{[^}]*?(\w+)=(\d+)[^}]*atob`)
-			if km := keyRX.FindStringSubmatch(source); len(km) >= 3 {
-				if k, err := strconv.Atoi(km[2]); err == nil {
-					decoders = append(decoders, StringDecoder{Name: name, Key: k})
-					continue
-				}
-			}
-			// Use default keys for known names.
-			defaultKeys := map[string]int{"aa": 8185, "a0": 18103, "b0": 11889}
+			defaultKeys := map[string]int{"aa": 8185, "a0": 18103, "b0": 47879}
 			if key, ok := defaultKeys[name]; ok {
 				decoders = append(decoders, StringDecoder{Name: name, Key: key})
 			}

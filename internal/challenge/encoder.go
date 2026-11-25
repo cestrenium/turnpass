@@ -28,10 +28,16 @@ type EncoderParams struct {
 var (
 	// Matches BigInt("0x...") calls.
 	rxBigInt = regexp.MustCompile(`BigInt\s*\(\s*["']0x([0-9a-fA-F]+)["']\s*\)`)
+	// Matches BigInt(VAR||(VAR=`0x...`)) calls (lazy-init pattern).
+	rxBigIntLazy = regexp.MustCompile("BigInt\\s*\\(\\s*\\w+\\|\\|\\(\\w+=`0x([0-9a-fA-F]+)`\\)\\s*\\)")
 	// Matches string literals that could be base64 alphabets (64 distinct chars).
-	rxString64 = regexp.MustCompile(`["']([A-Za-z0-9+/=_\-]{64,65})["']`)
+	rxString64 = regexp.MustCompile("[\"']([A-Za-z0-9+/=_\\-]{64,65})[\"']")
+	// Matches backtick string literals that could be base64 alphabets.
+	rxString64Backtick = regexp.MustCompile("`([A-Za-z0-9+/=_\\-]{64,65})`")
 	// Matches string literals of exactly 16 characters (potential key secrets).
-	rxString16 = regexp.MustCompile(`["']([^"']{16})["']`)
+	rxString16 = regexp.MustCompile("[\"']([^\"']{16})[\"']")
+	// Matches backtick string literals of exactly 16 characters.
+	rxString16Backtick = regexp.MustCompile("`([^`]{16})`")
 )
 
 // ExtractEncoderParams scans the iframe JavaScript source for the session's
@@ -44,7 +50,8 @@ var (
 func ExtractEncoderParams(iframeJS string) (*EncoderParams, error) {
 	params := &EncoderParams{}
 
-	// Find the RSA modulus: BigInt("0x...") with a 1024-bit (128-byte) modulus.
+	// Find the RSA modulus: BigInt("0x...") or BigInt(VAR||(VAR=`0x...`))
+	// with a 1024-bit (128-byte) modulus.
 	for _, m := range rxBigInt.FindAllStringSubmatch(iframeJS, -1) {
 		if len(m) >= 2 {
 			hexStr := m[1]
@@ -52,10 +59,25 @@ func ExtractEncoderParams(iframeJS string) (*EncoderParams, error) {
 			if !ok {
 				continue
 			}
-			// Check if it's 1024 bits (128 bytes).
 			if modulus.BitLen() > 0 && (modulus.BitLen()+7)/8 == 128 {
 				params.Modulus = modulus
 				break
+			}
+		}
+	}
+	// Also try the lazy-init pattern: BigInt(VAR||(VAR=`0xHEX`))
+	if params.Modulus == nil {
+		for _, m := range rxBigIntLazy.FindAllStringSubmatch(iframeJS, -1) {
+			if len(m) >= 2 {
+				hexStr := m[1]
+				modulus, ok := new(big.Int).SetString(hexStr, 16)
+				if !ok {
+					continue
+				}
+				if modulus.BitLen() > 0 && (modulus.BitLen()+7)/8 == 128 {
+					params.Modulus = modulus
+					break
+				}
 			}
 		}
 	}
@@ -73,9 +95,23 @@ func ExtractEncoderParams(iframeJS string) (*EncoderParams, error) {
 			}
 		}
 	}
+	// Also try backtick strings.
+	if params.Alphabet == "" {
+		for _, m := range rxString64Backtick.FindAllStringSubmatch(iframeJS, -1) {
+			if len(m) >= 2 {
+				candidate := m[1]
+				if len(candidate) >= 64 {
+					candidate = candidate[:64]
+				}
+				if isDistinctASCII(candidate) && len(candidate) == 64 {
+					params.Alphabet = candidate
+					break
+				}
+			}
+		}
+	}
 
 	// Find the key-transform secret: a 16-character string.
-	// This is typically found near charCodeAt calls or in the initial VM program.
 	for _, m := range rxString16.FindAllStringSubmatch(iframeJS, -1) {
 		if len(m) >= 2 {
 			secret := m[1]
@@ -84,6 +120,20 @@ func ExtractEncoderParams(iframeJS string) (*EncoderParams, error) {
 					params.Secret[i] = c
 				}
 				break
+			}
+		}
+	}
+	// Also try backtick strings.
+	if params.Secret == [16]byte{} {
+		for _, m := range rxString16Backtick.FindAllStringSubmatch(iframeJS, -1) {
+			if len(m) >= 2 {
+				secret := m[1]
+				if len(secret) == 16 && isPrintableASCII(secret) {
+					for i, c := range []byte(secret) {
+						params.Secret[i] = c
+					}
+					break
+				}
 			}
 		}
 	}
