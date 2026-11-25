@@ -284,24 +284,47 @@ func extractRunnerAndEncoder(src string, params *EncoderParams) {
 }
 
 // extractRunnerViaRegex is a regex fallback for finding the program runner.
+// The runner is installed as a property assignment:
+//
+//	OBJ[...]._hexname=function(VAR){return (EXPR,Kk[...])(xY,new CLASS(VAR),0,KEY,[])}
+//
+// or the simpler form:
+//
+//	NAME=function(VAR){return RUN(new CLASS(VAR),NUM,NUM,[])}
+//
+// The runner name is always a _hex string (underscore + 24 hex chars).
 func extractRunnerViaRegex(src string, params *EncoderParams) {
 	if params.RunnerName != "" {
 		return
 	}
-	// Flexible pattern: NAME=function(VAR){return RUN(new CLASS(VAR),...,...,[])}
-	// Handles XOR expressions and variable references in the numeric arguments.
-	// We only capture NAME, RUN, and CLASS — pc and key are evaluated by goja.
-	rxRunner := regexp.MustCompile(`(\w+)\s*=\s*function\s*\(\s*\w+\s*\)\s*\{\s*return\s+(\w+)\s*\(\s*[^,]*,\s*new\s+(\w+)\s*\(\s*\w+\s*\)\s*,`)
-	m := rxRunner.FindStringSubmatch(src)
+
+	// Pattern 1: Property assignment with computed callee.
+	// Captures the property name (runner name) and the class name.
+	// The pattern: ._hexname=function(VAR){...new CLASS(VAR)...}
+	rxProp := regexp.MustCompile(`\.(_[0-9a-f]{24})\s*=\s*function\s*\(\s*\w+\s*\)\s*\{[^}]*new\s+(\w+)\s*\(`)
+	m := rxProp.FindStringSubmatch(src)
+	if len(m) >= 3 {
+		params.RunnerName = m[1]
+		params.VMClass = m[2]
+		// RunFunc can't be easily extracted from the computed callee
+		// pattern, but we don't need it for goja execution.
+		return
+	}
+
+	// Pattern 2: Simple variable assignment.
+	// NAME=function(VAR){return RUN(new CLASS(VAR),...,...,[])}
+	rxSimple := regexp.MustCompile(`(\w+)\s*=\s*function\s*\(\s*\w+\s*\)\s*\{\s*return\s+(\w+)\s*\(\s*[^,]*,\s*new\s+(\w+)\s*\(`)
+	m = rxSimple.FindStringSubmatch(src)
 	if len(m) >= 4 {
 		params.RunnerName = m[1]
 		params.RunFunc = m[2]
 		params.VMClass = m[3]
 		return
 	}
-	// Try standard order: NAME=function(VAR){return RUN(new CLASS(VAR),NUM,NUM,[])}
-	rxRunner2 := regexp.MustCompile(`(\w+)\s*=\s*function\s*\(\s*\w+\s*\)\s*\{\s*return\s+(\w+)\s*\(\s*new\s+(\w+)\s*\(\s*\w+\s*\)\s*,`)
-	m = rxRunner2.FindStringSubmatch(src)
+
+	// Pattern 3: Simple variable assignment, standard order.
+	rxSimple2 := regexp.MustCompile(`(\w+)\s*=\s*function\s*\(\s*\w+\s*\)\s*\{\s*return\s+(\w+)\s*\(\s*new\s+(\w+)\s*\(`)
+	m = rxSimple2.FindStringSubmatch(src)
 	if len(m) >= 4 {
 		params.RunnerName = m[1]
 		params.RunFunc = m[2]

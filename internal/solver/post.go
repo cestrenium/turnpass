@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/cestrenium/turnpass/internal/challenge"
 	"github.com/cestrenium/turnpass/internal/codec"
@@ -39,8 +40,8 @@ type PostResult struct {
 }
 
 // PostChallenge sends an encoded challenge payload to the POST URL and decodes
-// the response. The request includes the cf-chl header and the iframe's
-// origin as the Referer.
+// the response. The request includes the cf-chl header, origin, and referer
+// matching cfsolve's http::requests::post_orchestrator format.
 //
 // The response is decoded using codec.DecodeResponse with the ray token from
 // the initial request, then base64-decoded to get the VM program bytecode.
@@ -49,14 +50,34 @@ type PostResult struct {
 func PostChallenge(ctx context.Context, client *transport.BrowserClient, initReq *challenge.InitialRequest, iframeURL, encodedBody string, stage Stage, sink Sink) (*PostResult, error) {
 	sink.Progress(fmt.Sprintf("[%s] POSTing %d bytes to %s", stage, len(encodedBody), initReq.URL))
 
-	// Build the POST request with the required headers.
-	resp, err := client.Do(ctx, "challenge_post", http.MethodPost, initReq.URL,
+	// Parse the POST URL to get the origin.
+	postURL, _ := url.Parse(initReq.URL)
+	origin := ""
+	if postURL != nil {
+		origin = postURL.Scheme + "://" + postURL.Host
+	}
+
+	// Use "orchestrator_post" kind for orchestrator POSTs, "challenge_post"
+	// for iframe POSTs. The kind selects the header template from the profile.
+	// The profile template provides static headers (accept, content-type,
+	// sec-fetch-*, accept-language, priority, accept-encoding, cf-chl-ra)
+	// and dynamic header slots (origin, cf-chl, content-length, referer,
+	// user-agent) that we fill in here.
+	kind := "challenge_post"
+	if stage == StageOrchestrator {
+		kind = "orchestrator_post"
+	}
+
+	// Dynamic headers that the template expects us to fill in.
+	headers := map[string]string{
+		"cf-chl":  initReq.CfChl,
+		"origin":  origin,
+		"referer": iframeURL,
+	}
+
+	resp, err := client.Do(ctx, kind, http.MethodPost, initReq.URL,
 		stringReader(encodedBody),
-		map[string]string{
-			"Content-Type": "text/plain;charset=UTF-8",
-			"cf-chl":       initReq.CfChl,
-			"cf-chl-ra":    "0",
-		},
+		headers,
 	)
 	if err != nil {
 		return nil, tperr.NewNetwork(fmt.Errorf("[%s] POST failed: %w", stage, err))

@@ -113,16 +113,59 @@ func (c *BrowserClient) SetInsecureTLS() {
 
 // Do sends req, applying the per-request-kind header order from the
 // fingerprint. kind selects which header order to use (e.g. "navigation",
-// "iframe", "script").
+// "iframe", "script", "orchestrator_post", "challenge_post").
+//
+// For each header in the kind's template:
+//   - "name: value" → set as a static header
+//   - "name" → look up in extraHeaders; if found, set it; otherwise skip
+//     (it's a dynamic header like content-length, origin, referer, cf-chl
+//     that the caller must provide)
+//
+// If the kind has no template, falls back to the default headers.
 func (c *BrowserClient) Do(ctx context.Context, kind, method, rawURL string, body io.Reader, extraHeaders map[string]string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)
 	}
-	applyHeaders(req, c.headers)
-	for k, v := range extraHeaders {
-		req.Header.Set(k, v)
+
+	// Try per-kind header template first.
+	template, hasTemplate := c.requestOrder[kind]
+	if hasTemplate {
+		// Apply headers in the template order.
+		for _, hdr := range template {
+			if idx := strings.Index(hdr, ":"); idx >= 0 {
+				// Static header: "name: value"
+				name := strings.TrimSpace(hdr[:idx])
+				value := strings.TrimSpace(hdr[idx+1:])
+				req.Header.Set(name, value)
+			} else {
+				// Dynamic header: "name" — look up in extraHeaders.
+				if v, ok := extraHeaders[hdr]; ok {
+					req.Header.Set(hdr, v)
+				}
+				// Also try case-insensitive lookup.
+				for ek, ev := range extraHeaders {
+					if strings.EqualFold(ek, hdr) {
+						req.Header.Set(hdr, ev)
+						break
+					}
+				}
+			}
+		}
+		// Also apply any extra headers not in the template.
+		for k, v := range extraHeaders {
+			if req.Header.Get(k) == "" {
+				req.Header.Set(k, v)
+			}
+		}
+	} else {
+		// Fall back to default headers.
+		applyHeaders(req, c.headers)
+		for k, v := range extraHeaders {
+			req.Header.Set(k, v)
+		}
 	}
+
 	if c.userAgent != "" && req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", c.userAgent)
 	}
