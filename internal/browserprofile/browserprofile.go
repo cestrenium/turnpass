@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/cestrenium/turnpass/internal/answers"
 	"github.com/cestrenium/turnpass/internal/fingerprint"
 )
 
@@ -21,6 +22,10 @@ type Browser struct {
 	// ChallengePageAnswers is the recorded probe-answer data for Cloudflare
 	// challenge pages, or nil.
 	ChallengePageAnswers json.RawMessage
+	// ParsedAnswers is the parsed Answers struct, or nil.
+	ParsedAnswers *answers.Answers
+	// ParsedChallengePageAnswers is the parsed challenge-page Answers, or nil.
+	ParsedChallengePageAnswers *answers.Answers
 }
 
 // Read loads the fingerprint at path and the answer files it names, relative
@@ -30,7 +35,7 @@ func Read(path string) (*Browser, error) {
 	if err != nil {
 		return nil, err
 	}
-	answers, err := fp.LoadAnswers(path)
+	rawAnswers, err := fp.LoadAnswers(path)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +43,19 @@ func Read(path string) (*Browser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Browser{Fingerprint: fp, Answers: answers, ChallengePageAnswers: cpa}, nil
+	b := &Browser{Fingerprint: fp, Answers: rawAnswers, ChallengePageAnswers: cpa}
+	// Parse the answers for structured access.
+	if len(rawAnswers) > 0 {
+		if parsed, err := answers.Parse(rawAnswers); err == nil {
+			b.ParsedAnswers = parsed
+		}
+	}
+	if len(cpa) > 0 {
+		if parsed, err := answers.Parse(cpa); err == nil {
+			b.ParsedChallengePageAnswers = parsed
+		}
+	}
+	return b, nil
 }
 
 // FromJSON builds a Browser from an in-memory fingerprint JSON document.
