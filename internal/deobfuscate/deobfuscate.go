@@ -68,9 +68,17 @@ func (d *Deobfuscator) foldConstants(source string) string {
 		return s
 	})
 
-	// Fold (n|0) to n
-	rxOrZero := regexp.MustCompile(`\((\d+)\|0\)`)
-	result = rxOrZero.ReplaceAllString(result, "$1")
+	// Fold (n|0) to n. Preserve a leading space when the preceding character
+	// is a letter or underscore (e.g., `case(n|0)` → `case n`, not `casen`),
+	// to avoid producing invalid JavaScript identifiers.
+	rxOrZero := regexp.MustCompile(`(\w)?\((\d+)\|0\)`)
+	result = rxOrZero.ReplaceAllStringFunc(result, func(s string) string {
+		m := rxOrZero.FindStringSubmatch(s)
+		if m[1] != "" {
+			return m[1] + " " + m[2]
+		}
+		return m[2]
+	})
 
 	return result
 }

@@ -478,11 +478,14 @@ func findRunner(prog *ast.Program) *runnerInfo {
 		}
 		// Among the arguments, find:
 		//   - A NewExpression (the VM class instance)
-		//   - Two consecutive numeric literals (pc, key) - typically the last 2 numerics before the empty array
-		//   - An empty array literal (the register file)
+		//   - Two consecutive numeric expressions (pc, key) — these may be
+		//     computed XOR/NOT expressions like 65382^(31090^~-19635)^51878
+		//     that our deobfuscation didn't fully fold.
+		//   - An empty array literal (the register file) — optional.
 		var ne *ast.NewExpression
 		var classIdent *ast.Identifier
-		var pcNum, keyNum *ast.NumberLiteral
+		var pcVal, keyVal float64
+		var pcFound, keyFound bool
 		for i, arg := range ce.ArgumentList {
 			if e, ok := arg.(*ast.NewExpression); ok && ne == nil {
 				ne = e
@@ -490,21 +493,21 @@ func findRunner(prog *ast.Program) *runnerInfo {
 					classIdent = id
 				}
 			}
-			if n, ok := arg.(*ast.NumberLiteral); ok {
-				// Track the last two consecutive numerics.
-				if i+1 < len(ce.ArgumentList) {
-					if n2, ok2 := ce.ArgumentList[i+1].(*ast.NumberLiteral); ok2 {
-						pcNum = n
-						keyNum = n2
-					}
+			// Try to evaluate this argument as a constant number.
+			if v, ok := evalConstInt(arg); ok {
+				if !pcFound {
+					pcVal = v
+					pcFound = true
+				} else if !keyFound {
+					keyVal = v
+					keyFound = true
 				}
 			}
+			_ = i
 		}
-		if ne == nil || classIdent == nil || pcNum == nil || keyNum == nil {
+		if ne == nil || classIdent == nil || !pcFound || !keyFound {
 			return true
 		}
-		pcVal := numberLiteralToFloat64(pcNum)
-		keyVal := numberLiteralToFloat64(keyNum)
 		found = &runnerInfo{
 			Name:       name,
 			RunFunc:    string(runIdent.Name),

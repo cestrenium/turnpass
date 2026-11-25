@@ -50,7 +50,6 @@ func main() {
 	verbose := fs.BoolP("verbose", "v", false, "Enable verbose progress output on stderr")
 	debugDir := fs.StringP("debug-dir", "D", "", "Directory to write debugging artifacts to")
 
-	fs.Lookup("help").Hidden = false
 	fs.SetInterspersed(true)
 	fs.Parse(os.Args[1:])
 
