@@ -95,6 +95,15 @@ func ExtractEncoderParams(iframeJS string) (*EncoderParams, error) {
 	// These don't have reliable regex counterparts.
 	extractRunnerAndEncoder(iframeJS, params)
 
+	// Regex fallback for initial program: if the AST walker didn't find
+	// the runner call (e.g., it's inside a deeply nested function that
+	// our walker doesn't reach, or the walker panicked), try regex.
+	// This is done OUTSIDE extractRunnerAndEncoder so that a panic in the
+	// AST analysis doesn't prevent the regex fallback from running.
+	if params.InitialProgram == "" && params.RunnerName != "" {
+		params.InitialProgram = findRunnerCallViaRegex(iframeJS, params.RunnerName)
+	}
+
 	// Validate that we found the required parameters.
 	if params.Modulus == nil {
 		return nil, fmt.Errorf("could not find RSA modulus in iframe JS")
@@ -247,6 +256,12 @@ func extractRunnerAndEncoder(src string, params *EncoderParams) {
 		if progStr := findRunnerCallWithLiteral(prog, runner.Name); progStr != "" {
 			params.InitialProgram = progStr
 		}
+		// Regex fallback: the runner call may be inside deeply nested
+		// functions that our AST walker doesn't reach. Search the
+		// source text for runnerName(`base64`) patterns.
+		if params.InitialProgram == "" {
+			params.InitialProgram = findRunnerCallViaRegex(src, runner.Name)
+		}
 	}
 
 	// Step 3: Find the encoder (the function whose result is passed to send()).
@@ -281,6 +296,43 @@ func extractRunnerViaRegex(src string, params *EncoderParams) {
 		fmt.Sscanf(m[4], "%f", &params.InitialPC)
 		fmt.Sscanf(m[5], "%f", &params.InitialKey)
 	}
+}
+
+// findRunnerCallViaRegex is a regex fallback for finding the base64-encoded
+// initial VM program passed to the runner. It searches for patterns like:
+//
+//	runnerName(`BASE64`)
+//	obj.runnerName(`BASE64`)
+//	runnerName("BASE64")
+//
+// The regex approach is needed when the runner call is inside deeply nested
+// functions that the AST walker doesn't reach (e.g., inside return statements
+// with sequence expressions inside nested function bodies).
+func findRunnerCallViaRegex(src, runnerName string) string {
+	if runnerName == "" {
+		return ""
+	}
+	escapedName := regexp.QuoteMeta(runnerName)
+	// Try backtick template literal first (most common in current Cloudflare).
+	// Use double-quoted strings so backticks are just regular characters.
+	pattern := regexp.MustCompile(escapedName + "\\(`([^`]{100,})`")
+	m := pattern.FindStringSubmatch(src)
+	if len(m) >= 2 {
+		return m[1]
+	}
+	// Try double-quoted string.
+	pattern = regexp.MustCompile(escapedName + "\\(\"([^\"]{100,})\"")
+	m = pattern.FindStringSubmatch(src)
+	if len(m) >= 2 {
+		return m[1]
+	}
+	// Try single-quoted string.
+	pattern = regexp.MustCompile(escapedName + "\\('([^']{100,})'")
+	m = pattern.FindStringSubmatch(src)
+	if len(m) >= 2 {
+		return m[1]
+	}
+	return ""
 }
 
 // tryModulus parses a hex string and returns a *big.Int if it's a 1024-bit modulus.
