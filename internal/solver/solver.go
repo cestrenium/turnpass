@@ -11,6 +11,7 @@ package solver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -316,14 +317,68 @@ func (s *Solver) clearFrom(ctx context.Context, pageURL string, opts Options, fe
 		sink.Artifact("loader.js", []byte(orchResult.LoaderScript))
 	}
 
-	// As above, the browser-check program VM is not yet ported. We cannot
-	// produce the proof payload Cloudflare requires, so we surface this
-	// honestly rather than fabricating a clearance cookie.
+	// Attempt orchestrator POST if we have all required pieces.
+	if orchResult.InitialRequest != nil && orchResult.EncoderParams != nil {
+		sink.Progress("attempting orchestrator POST")
+
+		// Build a minimal first payload from _cf_chl_opt values.
+		cfChlOpt := orchResult.InitialRequest.Options
+		options := make(map[string]interface{})
+		for k, v := range cfChlOpt {
+			options[k] = v
+		}
+		// Add frame check results (false for top-level page).
+		options["frame_top"] = false
+		options["frame_self"] = false
+
+		// Create the codec.
+		codec, err := codec.NewCodec(
+			orchResult.EncoderParams.Alphabet,
+			orchResult.EncoderParams.Modulus,
+			orchResult.EncoderParams.Secret,
+		)
+		if err != nil {
+			sink.Progress(fmt.Sprintf("warning: could not create codec: %v", err))
+		} else {
+			// Build a minimal payload JSON.
+			payloadJSON, _ := json.Marshal(options)
+			sink.Progress(fmt.Sprintf("payload: %d bytes", len(payloadJSON)))
+
+			// Encode the payload.
+			encoded, err := codec.Encode(payloadJSON)
+			if err != nil {
+				sink.Progress(fmt.Sprintf("warning: could not encode payload: %v", err))
+			} else {
+				sink.Progress(fmt.Sprintf("encoded payload: %d chars", len(encoded)))
+
+				// POST to the orchestrator URL.
+				postResult, err := PostChallenge(ctx, client, orchResult.InitialRequest,
+					orchResult.PageURL, encoded, StageOrchestrator, sink)
+				if err != nil {
+					sink.Progress(fmt.Sprintf("warning: orchestrator POST failed: %v", err))
+				} else {
+					sink.Progress(fmt.Sprintf("orchestrator POST result: status=%d, program=%d bytes",
+						postResult.Status, len(postResult.Program)))
+					if len(postResult.Program) > 0 {
+						sink.Artifact("orchestrator-response-program.bin", postResult.Program)
+					}
+					if postResult.Status == 200 {
+						sink.Progress("orchestrator POST succeeded with HTTP 200")
+					}
+				}
+			}
+		}
+	}
+
+	// The orchestrator's response contains a VM program that renders the
+	// Turnstile widget. Executing this program requires the full VM
+	// (handler execution, register masking, path exploration) which is
+	// the largest remaining piece.
 	_ = page
 	return Clearance{}, tperr.NewUnsupported(fmt.Errorf(
-		"challenge clearance requires the challenge-program VM, " +
-			"which is not yet ported; HTTP orchestration completed successfully " +
-			"(orchestrator, loader, iframe, and inline JS fetched); see KNOWN_LIMITATIONS.md on the docs branch"))
+		"orchestrator POST attempted; VM execution of response program " +
+			"is the remaining piece (requires handler execution, register " +
+			"masking, path exploration); see KNOWN_LIMITATIONS.md"))
 }
 
 // Solve navigates to the page, then clears a challenge or solves the page's

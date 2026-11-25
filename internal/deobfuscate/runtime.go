@@ -10,26 +10,25 @@ import (
 )
 
 // EvaluateRuntimeConstants uses the goja JavaScript runtime to execute the
-// deobfuscated orchestrator script and extract runtime-computed values
-// like the RSA modulus, base64 alphabet, and key-transform secret.
-//
-// This is a pragmatic approach: instead of porting the entire VM to
-// evaluate the orchestrator's code, we use goja's full JS runtime to
-// execute the deobfuscated script in a sandboxed environment and then
-// extract the values we need.
+// deobfuscated orchestrator script and extract runtime-computed values.
 func EvaluateRuntimeConstants(deobfuscatedSource string) (*RuntimeConstants, error) {
+	return EvaluateRuntimeConstantsWithConfig(deobfuscatedSource, nil)
+}
+
+// EvaluateRuntimeConstantsWithConfig is like EvaluateRuntimeConstants but
+// accepts _cf_chl_opt values from the challenge page to inject into the runtime.
+func EvaluateRuntimeConstantsWithConfig(deobfuscatedSource string, cfChlOptValues map[string]string) (*RuntimeConstants, error) {
 	vm := goja.New()
 
-	// Set up a sandboxed environment.
-	// The orchestrator expects certain globals to exist.
-	vm.Set("globalThis", map[string]interface{}{})
-	vm.Set("window", map[string]interface{}{})
-	vm.Set("self", map[string]interface{}{})
-
-	// The orchestrator accesses window._cf_chl_opt
+	// Set up _cf_chl_opt with values from the challenge page.
 	cfChlOpt := make(map[string]interface{})
+	for k, v := range cfChlOptValues {
+		cfChlOpt[k] = v
+	}
+
+	vm.Set("globalThis", map[string]interface{}{})
+	vm.Set("self", map[string]interface{}{})
 	vm.Set("_cf_chl_opt", cfChlOpt)
-	// Also set it as a property of window
 	windowObj := map[string]interface{}{
 		"_cf_chl_opt": cfChlOpt,
 	}
@@ -80,10 +79,9 @@ func EvaluateRuntimeConstants(deobfuscatedSource string) (*RuntimeConstants, err
 	result := &RuntimeConstants{}
 
 	// Try to extract the RSA modulus.
-	// Look for BigInt values in the VM's global scope.
-	result.Modulus = extractBigInt(vm)
-	result.Alphabet = extractString64(vm)
-	result.Secret = extractSecret16(vm)
+	result.Modulus = extractBigIntFromVM(vm)
+	result.Alphabet = extractString64FromVM(vm)
+	result.Secret = extractSecret16FromVM(vm)
 
 	// Also try to extract from _cf_chl_opt.
 	if cfOpt := vm.Get("_cf_chl_opt"); cfOpt != nil {
@@ -126,27 +124,50 @@ func (r *RuntimeConstants) String() string {
 		bits, len(r.Alphabet), len(r.Secret))
 }
 
-// extractBigInt tries to find a BigInt value in the VM's global scope.
-func extractBigInt(vm *goja.Runtime) *big.Int {
-	// Look for variables that are BigInts.
+// extractBigIntFromVM tries to find a BigInt value in the VM's global scope.
+func extractBigIntFromVM(vm *goja.Runtime) *big.Int {
+	// Scan all global variables.
 	for _, name := range vm.Get("globalThis").ToObject(vm).Keys() {
 		val := vm.Get(name)
 		if val == nil {
 			continue
 		}
-		// Check if it's a big number (potential BigInt).
 		s := val.String()
-		if len(s) >= 128 && isAllDigits(s) {
+		// Check if it's a large decimal number (BigInt).
+		if len(s) >= 200 && isAllDigits(s) {
 			if n, ok := new(big.Int).SetString(s, 10); ok && n.BitLen() >= 512 {
 				return n
+			}
+		}
+		// Check if it's a hex string.
+		if len(s) >= 200 && isHexString(s) {
+			if n, ok := new(big.Int).SetString(s, 16); ok && n.BitLen() >= 512 {
+				return n
+			}
+		}
+		// Check if it's an array containing BigInt values.
+		if obj := val.ToObject(vm); obj != nil {
+			if obj.ClassName() == "Array" {
+				for _, key := range obj.Keys() {
+					elem := obj.Get(key)
+					if elem == nil {
+						continue
+					}
+					es := elem.String()
+					if len(es) >= 200 && isAllDigits(es) {
+						if n, ok := new(big.Int).SetString(es, 10); ok && n.BitLen() >= 512 {
+							return n
+						}
+					}
+				}
 			}
 		}
 	}
 	return nil
 }
 
-// extractString64 tries to find a 64-character string in the VM's global scope.
-func extractString64(vm *goja.Runtime) string {
+// extractString64FromVM tries to find a 64-character string.
+func extractString64FromVM(vm *goja.Runtime) string {
 	for _, name := range vm.Get("globalThis").ToObject(vm).Keys() {
 		val := vm.Get(name)
 		if val == nil {
@@ -156,12 +177,27 @@ func extractString64(vm *goja.Runtime) string {
 		if len(s) == 64 && isBase64Alphabet(s) {
 			return s
 		}
+		// Also check arrays.
+		if obj := val.ToObject(vm); obj != nil {
+			if obj.ClassName() == "Array" {
+				for _, key := range obj.Keys() {
+					elem := obj.Get(key)
+					if elem == nil {
+						continue
+					}
+					es := elem.String()
+					if len(es) == 64 && isBase64Alphabet(es) {
+						return es
+					}
+				}
+			}
+		}
 	}
 	return ""
 }
 
-// extractSecret16 tries to find a 16-character string in the VM's global scope.
-func extractSecret16(vm *goja.Runtime) [16]byte {
+// extractSecret16FromVM tries to find a 16-character string.
+func extractSecret16FromVM(vm *goja.Runtime) [16]byte {
 	for _, name := range vm.Get("globalThis").ToObject(vm).Keys() {
 		val := vm.Get(name)
 		if val == nil {
@@ -225,18 +261,20 @@ func isPrintableASCII(s string) bool {
 // ExtractRuntimeEncoderParams combines deobfuscation and runtime evaluation
 // to extract encoder parameters from an obfuscated orchestrator script.
 func ExtractRuntimeEncoderParams(source string) (*RuntimeConstants, string, error) {
-	// First, deobfuscate with inlining.
+	return ExtractRuntimeEncoderParamsWithConfig(source, nil)
+}
+
+// ExtractRuntimeEncoderParamsWithConfig is like ExtractRuntimeEncoderParams
+// but accepts _cf_chl_opt values from the challenge page.
+func ExtractRuntimeEncoderParamsWithConfig(source string, cfChlOpt map[string]string) (*RuntimeConstants, string, error) {
 	deobf, err := DeobfuscateWithInlining(source)
 	if err != nil {
 		return nil, deobf, err
 	}
-
-	// Then, evaluate the deobfuscated script to extract runtime constants.
-	constants, err := EvaluateRuntimeConstants(deobf)
+	constants, err := EvaluateRuntimeConstantsWithConfig(deobf, cfChlOpt)
 	if err != nil {
 		return nil, deobf, err
 	}
-
 	return constants, deobf, nil
 }
 
