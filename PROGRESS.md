@@ -131,15 +131,28 @@ encoder body. The `NAME` is the key transform name (which maps to the
 secret in `installed.built`).
 
 ### 4. VM Class Extraction for Orchestrator (Blocking)
-The orchestrator's VM class (`n2`) has only a constructor, not a `run`
-method. The run function (`a` or `S9`) is a standalone function.
+The orchestrator's VM class (`n2`/`OP`) has only a constructor, not a `run`
+method. The run function (`S9`/`Ep`/`a`) is a standalone function.
 
-**Current state**: `FindVM` requires a class with a `run` method.
+**Current state**: `FindVMByRunner` now handles this pattern — it finds the
+VM class and run function by name using runner info from the encoder
+extraction. Validated: both are found in live orchestrators.
 
-**What's needed**: Update `FindVM` to also handle the standalone run
-function pattern. The runner info (VMClass, RunFunc, InitialPC,
-InitialKey) is already extracted by the encoder analysis; we need to
-connect it to the VM session/disassembler.
+**However**, the dispatch loop in current Cloudflare builds uses a different
+pattern than cfsolve expects:
+- cfsolve expects: `while(true){ switch(opcode^key){ case N: handler(); } }`
+- Current Cloudflare uses: `for(;;){ if(opcode===0){ OU(...) } else try{ tgb(opcode_id, ...) }catch{...} }`
+
+The `tgb` function is a separate handler dispatch function containing
+`switch(opcode_id ^ _0xdaff32){ case N: handler(); }`. The handlers are
+in `tgb`'s switch cases, not in the run function's loop.
+
+**What's needed**: Update `extractHandlers` to find the `tgb` dispatch
+function (called from the run function) and extract handlers from its
+switch statement. The dispatch function is identifiable by:
+- It's called from the run function's loop
+- It contains a switch statement with numeric case labels
+- The switch discriminant is an XOR of the first argument with a constant
 
 ### 5. VM Program Execution (Blocking)
 Executing the orchestrator's response VM program to get the iframe URL

@@ -160,12 +160,16 @@ func findDispatchLoop(stmt ast.Statement, whileLoop **ast.WhileStatement, forLoo
 			return
 		}
 	case *ast.ForStatement:
-		// for(;;) has no test, no initializer, no update.
+		// for(;;) has no test — this is the dispatch loop pattern
+		// used by current Cloudflare builds.
 		if s.Test == nil {
-			if hasSwitch(s.Body) {
-				*forLoop = s
-				return
-			}
+			*forLoop = s
+			return
+		}
+		// for(;test;) with a switch is also a dispatch loop.
+		if hasSwitch(s.Body) {
+			*forLoop = s
+			return
 		}
 	case *ast.BlockStatement:
 		for _, bs := range s.List {
@@ -249,10 +253,20 @@ func (def *VMDefinition) extractHandlers() error {
 		return nil
 	}
 
+	// First, try to find a switch statement directly in the dispatch loop
+	// (the cfsolve pattern: while(true){ switch(opcode^key){...} }).
 	var sw *ast.SwitchStatement
 	findSwitch(def.DispatchLoop.Body, &sw)
+
+	// If no switch in the dispatch loop, look for a handler dispatch
+	// function called from the loop (the current Cloudflare pattern:
+	// for(;;){ tgb(opcode_id, ...); } where tgb contains the switch).
 	if sw == nil {
-		return fmt.Errorf("no switch statement found in dispatch loop")
+		sw = def.findDispatchFunctionSwitch()
+	}
+
+	if sw == nil {
+		return nil
 	}
 
 	for _, c := range sw.Body {
@@ -268,6 +282,224 @@ func (def *VMDefinition) extractHandlers() error {
 	}
 
 	return nil
+}
+
+// findDispatchFunctionSwitch searches for a handler dispatch function called
+// from the dispatch loop. The dispatch function contains a switch statement
+// on (firstArg ^ constant) with numeric case labels.
+//
+// This handles the current Cloudflare VM pattern where the run function's
+// loop calls a separate function (e.g. tgb) that contains the handler
+// dispatch switch.
+func (def *VMDefinition) findDispatchFunctionSwitch() *ast.SwitchStatement {
+	if def.DispatchLoop == nil || def.Script == nil {
+		return nil
+	}
+
+	// Collect all function names called from the dispatch loop body.
+	calledFuncs := make(map[string]bool)
+	collectCalledFunctions(def.DispatchLoop.Body, calledFuncs)
+
+	// For each called function, check if it contains a switch statement
+	// with numeric case labels.
+	for name := range calledFuncs {
+		if fn, ok := def.Functions[name]; ok && fn.Body != nil {
+			var sw *ast.SwitchStatement
+			findSwitch(fn.Body, &sw)
+			if sw != nil && hasNumericCases(sw) {
+				return sw
+			}
+			// Also try recursing into the function body for nested switches
+			// (the dispatch function might call another function that has
+			// the switch).
+			var nestedSw *ast.SwitchStatement
+			findSwitchDeep(fn.Body, &nestedSw)
+			if nestedSw != nil && hasNumericCases(nestedSw) {
+				return nestedSw
+			}
+		}
+	}
+
+	// If we still haven't found a switch, try all collected functions
+	// and look for ones with large switches (many numeric cases).
+	for name, fn := range def.Functions {
+		if fn == nil || fn.Body == nil {
+			continue
+		}
+		var sw *ast.SwitchStatement
+		findSwitch(fn.Body, &sw)
+		if sw != nil && countNumericCases(sw) > 5 {
+			// This is likely the dispatch function.
+			_ = name
+			return sw
+		}
+	}
+	return nil
+}
+
+// findSwitchDeep recursively searches for a switch statement in all nested
+// statements.
+func findSwitchDeep(stmt ast.Statement, sw **ast.SwitchStatement) {
+	if *sw != nil || stmt == nil {
+		return
+	}
+	if s, ok := stmt.(*ast.SwitchStatement); ok {
+		*sw = s
+		return
+	}
+	switch s := stmt.(type) {
+	case *ast.BlockStatement:
+		for _, bs := range s.List {
+			findSwitchDeep(bs, sw)
+			if *sw != nil {
+				return
+			}
+		}
+	case *ast.IfStatement:
+		findSwitchDeep(s.Consequent, sw)
+		if *sw != nil {
+			return
+		}
+		if s.Alternate != nil {
+			findSwitchDeep(s.Alternate, sw)
+		}
+	case *ast.WhileStatement:
+		findSwitchDeep(s.Body, sw)
+	case *ast.ForStatement:
+		findSwitchDeep(s.Body, sw)
+	case *ast.TryStatement:
+		if s.Body != nil {
+			findSwitchDeep(s.Body, sw)
+		}
+		if s.Catch != nil {
+			findSwitchDeep(s.Catch, sw)
+		}
+	case *ast.SwitchStatement:
+		// Already handled above, but also search case bodies.
+		for _, c := range s.Body {
+			for _, cs := range c.Consequent {
+				findSwitchDeep(cs, sw)
+				if *sw != nil {
+					return
+				}
+			}
+		}
+	case *ast.LabelledStatement:
+		findSwitchDeep(s.Statement, sw)
+	}
+}
+
+// countNumericCases counts the number of cases with numeric test values.
+func countNumericCases(sw *ast.SwitchStatement) int {
+	count := 0
+	for _, c := range sw.Body {
+		if c.Test != nil {
+			if _, ok := extractNumber(c.Test); ok {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// collectCalledFunctions walks a statement and collects all global function
+// names that are called.
+func collectCalledFunctions(stmt ast.Statement, called map[string]bool) {
+	if stmt == nil {
+		return
+	}
+	switch s := stmt.(type) {
+	case *ast.ExpressionStatement:
+		collectCalledFunctionsFromExpr(s.Expression, called)
+	case *ast.BlockStatement:
+		for _, bs := range s.List {
+			collectCalledFunctions(bs, called)
+		}
+	case *ast.IfStatement:
+		collectCalledFunctionsFromExpr(s.Test, called)
+		collectCalledFunctions(s.Consequent, called)
+		if s.Alternate != nil {
+			collectCalledFunctions(s.Alternate, called)
+		}
+	case *ast.ForStatement:
+		if n, ok := s.Initializer.(*ast.ForLoopInitializerExpression); ok {
+			collectCalledFunctionsFromExpr(n.Expression, called)
+		}
+		if s.Test != nil {
+			collectCalledFunctionsFromExpr(s.Test, called)
+		}
+		if s.Update != nil {
+			collectCalledFunctionsFromExpr(s.Update, called)
+		}
+		collectCalledFunctions(s.Body, called)
+	case *ast.WhileStatement:
+		collectCalledFunctionsFromExpr(s.Test, called)
+		collectCalledFunctions(s.Body, called)
+	case *ast.TryStatement:
+		if s.Body != nil {
+			collectCalledFunctions(s.Body, called)
+		}
+		if s.Catch != nil {
+			collectCalledFunctions(s.Catch, called)
+		}
+	case *ast.ReturnStatement:
+		if s.Argument != nil {
+			collectCalledFunctionsFromExpr(s.Argument, called)
+		}
+	}
+}
+
+// collectCalledFunctionsFromExpr walks an expression and collects all global
+// function names that are called.
+func collectCalledFunctionsFromExpr(expr ast.Expression, called map[string]bool) {
+	if expr == nil {
+		return
+	}
+	switch e := expr.(type) {
+	case *ast.CallExpression:
+		if id, ok := e.Callee.(*ast.Identifier); ok {
+			called[string(id.Name)] = true
+		}
+		// Recurse into callee and arguments.
+		collectCalledFunctionsFromExpr(e.Callee, called)
+		for _, arg := range e.ArgumentList {
+			collectCalledFunctionsFromExpr(arg, called)
+		}
+	case *ast.BinaryExpression:
+		collectCalledFunctionsFromExpr(e.Left, called)
+		collectCalledFunctionsFromExpr(e.Right, called)
+	case *ast.UnaryExpression:
+		collectCalledFunctionsFromExpr(e.Operand, called)
+	case *ast.ConditionalExpression:
+		collectCalledFunctionsFromExpr(e.Test, called)
+		collectCalledFunctionsFromExpr(e.Consequent, called)
+		collectCalledFunctionsFromExpr(e.Alternate, called)
+	case *ast.SequenceExpression:
+		for _, se := range e.Sequence {
+			collectCalledFunctionsFromExpr(se, called)
+		}
+	case *ast.AssignExpression:
+		collectCalledFunctionsFromExpr(e.Left, called)
+		collectCalledFunctionsFromExpr(e.Right, called)
+	case *ast.DotExpression:
+		collectCalledFunctionsFromExpr(e.Left, called)
+	case *ast.BracketExpression:
+		collectCalledFunctionsFromExpr(e.Left, called)
+		collectCalledFunctionsFromExpr(e.Member, called)
+	}
+}
+
+// hasNumericCases checks if a switch statement has at least one case with a
+// numeric test value.
+func hasNumericCases(sw *ast.SwitchStatement) bool {
+	for _, c := range sw.Body {
+		if c.Test != nil {
+			if _, ok := extractNumber(c.Test); ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func methodName(key ast.Expression) string {
