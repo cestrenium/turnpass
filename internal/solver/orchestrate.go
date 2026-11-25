@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cestrenium/turnpass/internal/challenge"
+	"github.com/cestrenium/turnpass/internal/deobfuscate"
 	tperr "github.com/cestrenium/turnpass/internal/errors"
 	"github.com/cestrenium/turnpass/internal/extraparams"
 	"github.com/cestrenium/turnpass/internal/transport"
@@ -106,11 +107,22 @@ func (s *Solver) orchestrate(ctx context.Context, client *transport.BrowserClien
 			result.OrchestratorScript = script
 			sink.Progress(fmt.Sprintf("orchestrator script: %d bytes", len(script)))
 
-			// Try to extract encoder parameters from the orchestrator script.
-			sink.Progress("extracting encoder parameters from orchestrator")
-			encParams, err := challenge.ExtractEncoderParams(script)
+			// Deobfuscate the orchestrator script.
+			sink.Progress("deobfuscating orchestrator script")
+			deobf, err := deobfuscate.DeobfuscateScript(script)
 			if err != nil {
-				sink.Progress(fmt.Sprintf("warning: could not extract encoder params from orchestrator: %v", err))
+				sink.Progress(fmt.Sprintf("warning: deobfuscation error: %v", err))
+				deobf = script
+			} else {
+				sink.Progress(fmt.Sprintf("deobfuscated: %d -> %d bytes", len(script), len(deobf)))
+				sink.Artifact("orchestrator.deobfuscated.js", []byte(deobf))
+			}
+
+			// Try to extract encoder parameters from the deobfuscated script.
+			sink.Progress("extracting encoder parameters from deobfuscated orchestrator")
+			encParams, err := challenge.ExtractEncoderParams(deobf)
+			if err != nil {
+				sink.Progress(fmt.Sprintf("warning: could not extract encoder params: %v", err))
 			} else {
 				result.EncoderParams = encParams
 				sink.Progress(fmt.Sprintf("encoder params: %s", encParams.String()))
