@@ -130,40 +130,33 @@ encoder's enclosing IIFE, where `VAR` is called as a function in the
 encoder body. The `NAME` is the key transform name (which maps to the
 secret in `installed.built`).
 
-### 4. VM Class Extraction for Orchestrator (Blocking)
-The orchestrator's VM class (`n2`/`OP`) has only a constructor, not a `run`
-method. The run function (`S9`/`Ep`/`a`) is a standalone function.
+### 4. VM Execution via Goja Sandbox (BREAKTHROUGH — Partially Working)
+Instead of building a tree-based dispatch VM interpreter, we use goja
+to execute the real orchestrator JavaScript in a sandboxed environment.
 
-**Current state**: `FindVMByRunner` now handles this pattern — it finds the
-VM class and run function by name using runner info from the encoder
-extraction. Validated: both are found in live orchestrators.
+**Current state**: The `internal/vmexec` package:
+1. Loads the orchestrator JS in goja with comprehensive browser API stubs
+2. Calls the runner with the initial VM program
+3. The runner returns the key transform function (e.g. `function(){return zc(gF,gU)}`)
+4. Installs the key transform under the missing global name (found via
+   ReferenceError capture)
+5. Calls the encoder to produce the encoded payload
+6. The encoder produces an 8738-char payload (vs 610 from codec) — the
+   correct payload structure with all VM-computed fields
 
-**However**, the dispatch loop in current Cloudflare builds uses a different
-pattern than cfsolve expects:
-- cfsolve expects: `while(true){ switch(opcode^key){ case N: handler(); } }`
-  with byte-sized opcodes (0-255) and a flat switch.
-- Current Cloudflare uses: `for(;;){ if(opcode===0){ OU(...) } else try{ tgb(opcode_id, ...) }catch{...} }`
-  where `tgb` is a **tree-based recursive dispatcher** with only 2 cases per
-  call level. Each case may call `tgb` again with a different opcode ID,
-  creating a multi-level dispatch tree.
+**Remaining issue**: The VM execution is incomplete — the key transform
+function throws a TypeError when called (the VM dispatch hits a missing
+browser API at `z2`). This means the key transform doesn't work correctly,
+and the payload is encrypted with a wrong key. The server returns HTTP 400
+with an encrypted error body.
 
-This is a fundamentally different VM architecture. The `tgb` function has
-`switch(opcode_id ^ _0xdaff32)` with only 2 numeric cases (1206955360 and
-1477991615), and each case recurses into `tgb` with a new opcode ID. The
-opcode is not a single byte — it's a multi-level path through the dispatch
-tree.
-
-**What's needed**: A new VM interpreter that can handle the tree-based
-dispatch pattern. This requires:
-- Decoding the dispatch tree from the `tgb` function's switch cases.
-- Following recursive calls to build the full opcode → handler mapping.
-- Interpreting opcodes as paths through the tree, not single bytes.
-- This is a significant architectural change from cfsolve's flat dispatch.
+**What's needed**: Add more browser API stubs so the VM dispatch completes
+without errors. The specific API that's missing can be found by examining
+the TypeError stack trace and checking what `z2` (or equivalent) accesses.
 
 ### 5. VM Program Execution (Blocking)
 Executing the orchestrator's response VM program to get the iframe URL
-requires the full VM: handler execution, register masking, path
-exploration.
+requires either the goja sandbox (approach #4) or the full symbolic VM.
 
 **Current state**: The VM has a disassembler and symbolic evaluator, but
 they haven't been validated against real Cloudflare VM programs.
@@ -185,20 +178,21 @@ $ turnpass --url https://nopecha.com/captcha/cloudflare \
 navigating to https://nopecha.com/captcha/cloudflare
 got 403 (5684 bytes)
 detected 5s challenge (status 403)
-orchestrator script: 627850 bytes
-deobfuscated: 627850 -> 464715 bytes
-encoder params: alphabet 64 chars, modulus 1024 bits, runner found,
-                encoder "u8", initialProgram 27488 bytes
+orchestrator script: 630044 bytes
+deobfuscated: 630044 -> 471953 bytes
+encoder params: alphabet 64 chars, modulus 1024 bits,
+                runner "_ca5f7c852515399223a0f976",
+                encoder "lK",
+                initialProgram 27488 bytes
 orchestrator POST URL: .../h/b/fo/<id>:<ts>:<nonce>/<ray>/<token>
-POST returned HTTP 400; 121 bytes
-response: {"d":"<encrypted>"}
+goja-encoded payload: 8738 chars (correct structure)
+POST returned HTTP 400; 121 bytes (encrypted error)
 ```
 
-The HTTP 400 with an encrypted response body confirms the server is
-processing the POST. The 400 is expected because:
-1. The payload doesn't match the template (wrong field names/values).
-2. The 16-byte secret is incorrect (causing the codec to produce
-   garbage that the server can't decrypt).
+The goja-based encoder produces an 8738-char payload with the correct
+VM-computed structure. The HTTP 400 is because the key transform didn't
+work correctly (VM execution incomplete due to missing browser APIs).
+The encrypted error body confirms the server processed the POST.
 
 ## Architecture Summary
 
