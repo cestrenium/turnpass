@@ -11,6 +11,7 @@ import (
 	"github.com/cestrenium/turnpass/internal/challenge"
 	tperr "github.com/cestrenium/turnpass/internal/errors"
 	"github.com/cestrenium/turnpass/internal/transport"
+	"github.com/cestrenium/turnpass/internal/vm"
 )
 
 // OrchestrationResult holds the results of the HTTP orchestration phase:
@@ -49,6 +50,10 @@ type OrchestrationResult struct {
 	// InitialRequest is the POST URL and cf-chl token extracted from the
 	// iframe's inline JavaScript. Set when IframeJS is non-empty.
 	InitialRequest *challenge.InitialRequest
+
+	// VMSession is the VM session extracted from the iframe JS, if the VM
+	// class was found and a session could be created.
+	VMSession *vm.Session
 
 	// Widget is the Turnstile widget being solved.
 	Widget *Widget
@@ -183,6 +188,35 @@ func (s *Solver) orchestrate(ctx context.Context, client *transport.BrowserClien
 					result.InitialRequest = initReq
 					sink.Progress(fmt.Sprintf("POST URL: %s", initReq.URL))
 					sink.Progress(fmt.Sprintf("cf-chl token: %s (ray: %s)", initReq.CfChl, initReq.Ray))
+				}
+
+				// Attempt to parse the iframe JS and find the VM.
+				sink.Progress("attempting VM analysis of iframe JS")
+				vmScript, err := vm.ParseScript(iframeJS)
+				if err != nil {
+					sink.Progress(fmt.Sprintf("warning: could not parse iframe JS: %v", err))
+				} else {
+					vmDef, err := vm.FindVM(vmScript)
+					if err != nil {
+						sink.Progress(fmt.Sprintf("warning: could not find VM in iframe JS: %v", err))
+					} else {
+						sink.Progress(fmt.Sprintf("VM found: %s", vmDef.String()))
+
+						// Create a session and attempt disassembly.
+						session, err := vm.NewSession(vmDef)
+						if err != nil {
+							sink.Progress(fmt.Sprintf("warning: could not create VM session: %v", err))
+						} else {
+							sink.Progress(fmt.Sprintf("VM session: %s", session.String()))
+
+							// Try to disassemble a minimal program (just the first byte).
+							_ = vm.NewMachine(session)
+							if len(initReq.Ray) > 0 {
+								sink.Progress("VM analysis complete; program disassembly requires deobfuscated JS")
+							}
+							result.VMSession = session
+						}
+					}
 				}
 			} else {
 				sink.Progress("warning: no inline JavaScript found in iframe")
