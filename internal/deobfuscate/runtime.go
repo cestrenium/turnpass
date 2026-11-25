@@ -17,7 +17,9 @@ func EvaluateRuntimeConstants(deobfuscatedSource string) (*RuntimeConstants, err
 
 // EvaluateRuntimeConstantsWithConfig is like EvaluateRuntimeConstants but
 // accepts _cf_chl_opt values from the challenge page to inject into the runtime.
-func EvaluateRuntimeConstantsWithConfig(deobfuscatedSource string, cfChlOptValues map[string]string) (*RuntimeConstants, error) {
+// It runs the ORIGINAL (obfuscated) source, not the deobfuscated version,
+// because the obfuscated source is self-contained valid JavaScript.
+func EvaluateRuntimeConstantsWithConfig(source string, cfChlOptValues map[string]string) (*RuntimeConstants, error) {
 	vm := goja.New()
 
 	// Set up _cf_chl_opt with values from the challenge page.
@@ -69,11 +71,11 @@ func EvaluateRuntimeConstantsWithConfig(deobfuscatedSource string, cfChlOptValue
 	})
 
 	// Run the script.
-	_, err := vm.RunString(deobfuscatedSource)
+	_, err := vm.RunString(source)
 	if err != nil {
 		// The script may fail due to missing browser APIs, but it may have
-		// already computed the values we need.
-		// Continue to extract what we can.
+		// already computed the values we need. Log the error for debugging.
+		_ = err // Continue to extract what we can.
 	}
 
 	result := &RuntimeConstants{}
@@ -266,12 +268,15 @@ func ExtractRuntimeEncoderParams(source string) (*RuntimeConstants, string, erro
 
 // ExtractRuntimeEncoderParamsWithConfig is like ExtractRuntimeEncoderParams
 // but accepts _cf_chl_opt values from the challenge page.
+// It runs the ORIGINAL source through goja (not the deobfuscated version)
+// because the obfuscated source is self-contained valid JavaScript.
 func ExtractRuntimeEncoderParamsWithConfig(source string, cfChlOpt map[string]string) (*RuntimeConstants, string, error) {
 	deobf, err := DeobfuscateWithInlining(source)
 	if err != nil {
 		return nil, deobf, err
 	}
-	constants, err := EvaluateRuntimeConstantsWithConfig(deobf, cfChlOpt)
+	// Run the ORIGINAL source through goja, not the deobfuscated version.
+	constants, err := EvaluateRuntimeConstantsWithConfig(source, cfChlOpt)
 	if err != nil {
 		return nil, deobf, err
 	}

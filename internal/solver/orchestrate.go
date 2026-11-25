@@ -118,20 +118,36 @@ func (s *Solver) orchestrate(ctx context.Context, client *transport.BrowserClien
 				sink.Artifact("orchestrator.deobfuscated.js", []byte(deobf))
 			}
 
+			// Extract _cf_chl_opt values from the challenge page HTML first.
+			cfChlOpt := challenge.ExtractCfChlOptValues(pageHTML)
+			sink.Progress(fmt.Sprintf("_cf_chl_opt: %d values (cH=%q cFPWv=%q cRay=%q)",
+				len(cfChlOpt), truncateStr(cfChlOpt["cH"], 20), cfChlOpt["cFPWv"], cfChlOpt["cRay"]))
+
 			// Try to extract encoder parameters from the deobfuscated script.
 			sink.Progress("extracting encoder parameters from deobfuscated orchestrator")
 			encParams, err := challenge.ExtractEncoderParams(deobf)
 			if err != nil {
-				sink.Progress(fmt.Sprintf("warning: could not extract encoder params: %v", err))
+				sink.Progress(fmt.Sprintf("warning: static extraction failed: %v", err))
+				// Fall back to runtime evaluation with _cf_chl_opt injection.
+				sink.Progress("attempting runtime evaluation for encoder params")
+				constants, _, err := deobfuscate.ExtractRuntimeEncoderParamsWithConfig(script, cfChlOpt)
+				if err != nil {
+					sink.Progress(fmt.Sprintf("warning: runtime evaluation failed: %v", err))
+				} else {
+					sink.Progress(fmt.Sprintf("runtime constants: %s", constants.String()))
+					if constants.HasModulus() {
+						result.EncoderParams = &challenge.EncoderParams{
+							Modulus:  constants.Modulus,
+							Alphabet: constants.Alphabet,
+						}
+						copy(result.EncoderParams.Secret[:], constants.Secret[:])
+						sink.Progress(fmt.Sprintf("encoder params (runtime): %s", result.EncoderParams.String()))
+					}
+				}
 			} else {
 				result.EncoderParams = encParams
 				sink.Progress(fmt.Sprintf("encoder params: %s", encParams.String()))
 			}
-
-			// Extract _cf_chl_opt values from the challenge page HTML.
-			cfChlOpt := challenge.ExtractCfChlOptValues(pageHTML)
-			sink.Progress(fmt.Sprintf("_cf_chl_opt: %d values (cH=%q cFPWv=%q cRay=%q)",
-				len(cfChlOpt), truncateStr(cfChlOpt["cH"], 20), cfChlOpt["cFPWv"], cfChlOpt["cRay"]))
 
 			// Extract orchestrator POST URL and cf-chl token.
 			sink.Progress("extracting orchestrator POST request")
