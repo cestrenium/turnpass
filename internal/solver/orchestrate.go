@@ -107,9 +107,9 @@ func (s *Solver) orchestrate(ctx context.Context, client *transport.BrowserClien
 			result.OrchestratorScript = script
 			sink.Progress(fmt.Sprintf("orchestrator script: %d bytes", len(script)))
 
-			// Deobfuscate the orchestrator script.
+			// Deobfuscate the orchestrator script with accessor inlining.
 			sink.Progress("deobfuscating orchestrator script")
-			deobf, err := deobfuscate.DeobfuscateScript(script)
+			deobf, err := deobfuscate.DeobfuscateWithInlining(script)
 			if err != nil {
 				sink.Progress(fmt.Sprintf("warning: deobfuscation error: %v", err))
 				deobf = script
