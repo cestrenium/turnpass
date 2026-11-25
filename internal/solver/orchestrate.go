@@ -51,6 +51,10 @@ type OrchestrationResult struct {
 	// iframe's inline JavaScript. Set when IframeJS is non-empty.
 	InitialRequest *challenge.InitialRequest
 
+	// EncoderParams holds the codec parameters (RSA modulus, base64 alphabet,
+	// key secret) extracted from the iframe JS, if found.
+	EncoderParams *challenge.EncoderParams
+
 	// VMSession is the VM session extracted from the iframe JS, if the VM
 	// class was found and a session could be created.
 	VMSession *vm.Session
@@ -97,6 +101,16 @@ func (s *Solver) orchestrate(ctx context.Context, client *transport.BrowserClien
 			}
 			result.OrchestratorScript = script
 			sink.Progress(fmt.Sprintf("orchestrator script: %d bytes", len(script)))
+
+			// Try to extract encoder parameters from the orchestrator script.
+			sink.Progress("extracting encoder parameters from orchestrator")
+			encParams, err := challenge.ExtractEncoderParams(script)
+			if err != nil {
+				sink.Progress(fmt.Sprintf("warning: could not extract encoder params from orchestrator: %v", err))
+			} else {
+				result.EncoderParams = encParams
+				sink.Progress(fmt.Sprintf("encoder params: %s", encParams.String()))
+			}
 		}
 		// Also fetch the loader script for completeness (the orchestrator
 		// may reload it).
@@ -208,15 +222,21 @@ func (s *Solver) orchestrate(ctx context.Context, client *transport.BrowserClien
 							sink.Progress(fmt.Sprintf("warning: could not create VM session: %v", err))
 						} else {
 							sink.Progress(fmt.Sprintf("VM session: %s", session.String()))
-
-							// Try to disassemble a minimal program (just the first byte).
 							_ = vm.NewMachine(session)
-							if len(initReq.Ray) > 0 {
-								sink.Progress("VM analysis complete; program disassembly requires deobfuscated JS")
-							}
+							sink.Progress("VM analysis complete; program disassembly requires deobfuscated JS")
 							result.VMSession = session
 						}
 					}
+				}
+
+				// Extract encoder parameters (RSA modulus, base64 alphabet, key secret).
+				sink.Progress("extracting encoder parameters from iframe JS")
+				encParams, err := challenge.ExtractEncoderParams(iframeJS)
+				if err != nil {
+					sink.Progress(fmt.Sprintf("warning: could not extract encoder params: %v", err))
+				} else {
+					result.EncoderParams = encParams
+					sink.Progress(fmt.Sprintf("encoder params: %s", encParams.String()))
 				}
 			} else {
 				sink.Progress("warning: no inline JavaScript found in iframe")
