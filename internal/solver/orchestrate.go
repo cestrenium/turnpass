@@ -127,6 +127,46 @@ func (s *Solver) orchestrate(ctx context.Context, client *transport.BrowserClien
 				result.EncoderParams = encParams
 				sink.Progress(fmt.Sprintf("encoder params: %s", encParams.String()))
 			}
+
+			// Extract _cf_chl_opt values from the challenge page HTML.
+			cfChlOpt := challenge.ExtractCfChlOptValues(pageHTML)
+			sink.Progress(fmt.Sprintf("_cf_chl_opt: %d values (cH=%q cFPWv=%q cRay=%q)",
+				len(cfChlOpt), truncateStr(cfChlOpt["cH"], 20), cfChlOpt["cFPWv"], cfChlOpt["cRay"]))
+
+			// Extract orchestrator POST URL and cf-chl token.
+			sink.Progress("extracting orchestrator POST request")
+			orchReq, err := challenge.ExtractOrchestratorRequest(deobf, pageURL)
+			if err != nil {
+				sink.Progress(fmt.Sprintf("warning: could not extract orchestrator request: %v", err))
+			} else {
+				// Build the full POST URL using _cf_chl_opt values.
+				variant := cfChlOpt["cFPWv"]
+				if variant == "" {
+					variant = "b"
+				}
+				ray := cfChlOpt["cRay"]
+				foPath := orchReq.Options["foPath"]
+
+				// The orchestrator POST URL is:
+				// origin + /cdn-cgi/challenge-platform/h/ + variant + foPath + ray + /
+				if foPath != "" && ray != "" {
+					// Extract the /fo/ path components from the orchestrator.
+					// foPath looks like /fo/1269065965:1795592427:TOKEN/
+					// The POST URL is origin + /cdn-cgi/challenge-platform/h/ + variant + foPath
+					parsedURL, _ := url.Parse(pageURL)
+					origin := parsedURL.Scheme + "://" + parsedURL.Host
+					postURL := origin + "/cdn-cgi/challenge-platform/h/" + variant + foPath
+
+					result.InitialRequest = &challenge.InitialRequest{
+						URL:     postURL,
+						CfChl:   cfChlOpt["cH"],
+						Ray:     ray,
+						Options: cfChlOpt,
+					}
+					sink.Progress(fmt.Sprintf("orchestrator POST URL: %s", postURL))
+					sink.Progress(fmt.Sprintf("cf-chl token: %s (ray: %s)", truncateStr(cfChlOpt["cH"], 30), ray))
+				}
+			}
 		}
 		// Also fetch the loader script for completeness (the orchestrator
 		// may reload it).
@@ -370,7 +410,14 @@ func resolveReferer(pageURL, targetURL string) string {
 }
 
 // postChallengePayload posts an encoded challenge body to the challenge POST URL.
-// This is used by the VM execution phase (not yet implemented).
 func postChallengePayload(ctx context.Context, client *transport.BrowserClient, iframeURL, postURL, cfChl, body string) (*http.Response, error) {
 	return client.Post(ctx, "challenge_post", postURL, "text/plain;charset=UTF-8", strings.NewReader(body))
+}
+
+// truncateStr truncates a string to maxLen characters, adding "..." if truncated.
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

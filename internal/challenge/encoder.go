@@ -31,9 +31,10 @@ var (
 	// Matches BigInt(VAR||(VAR=`0x...`)) calls (lazy-init pattern).
 	rxBigIntLazy = regexp.MustCompile("BigInt\\s*\\(\\s*\\w+\\|\\|\\(\\w+=`0x([0-9a-fA-F]+)`\\)\\s*\\)")
 	// Matches string literals that could be base64 alphabets (64 distinct chars).
-	rxString64 = regexp.MustCompile("[\"']([A-Za-z0-9+/=_\\-]{64,65})[\"']")
+	// Includes $ character which Cloudflare uses in custom alphabets.
+	rxString64 = regexp.MustCompile("[\"']([A-Za-z0-9+/=_\\-$]{64,65})[\"']")
 	// Matches backtick string literals that could be base64 alphabets.
-	rxString64Backtick = regexp.MustCompile("`([A-Za-z0-9+/=_\\-]{64,65})`")
+	rxString64Backtick = regexp.MustCompile("`([A-Za-z0-9+/=_\\-$]{64,65})`")
 	// Matches string literals of exactly 16 characters (potential key secrets).
 	rxString16 = regexp.MustCompile("[\"']([^\"']{16})[\"']")
 	// Matches backtick string literals of exactly 16 characters.
