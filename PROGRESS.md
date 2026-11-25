@@ -141,18 +141,24 @@ extraction. Validated: both are found in live orchestrators.
 **However**, the dispatch loop in current Cloudflare builds uses a different
 pattern than cfsolve expects:
 - cfsolve expects: `while(true){ switch(opcode^key){ case N: handler(); } }`
+  with byte-sized opcodes (0-255) and a flat switch.
 - Current Cloudflare uses: `for(;;){ if(opcode===0){ OU(...) } else try{ tgb(opcode_id, ...) }catch{...} }`
+  where `tgb` is a **tree-based recursive dispatcher** with only 2 cases per
+  call level. Each case may call `tgb` again with a different opcode ID,
+  creating a multi-level dispatch tree.
 
-The `tgb` function is a separate handler dispatch function containing
-`switch(opcode_id ^ _0xdaff32){ case N: handler(); }`. The handlers are
-in `tgb`'s switch cases, not in the run function's loop.
+This is a fundamentally different VM architecture. The `tgb` function has
+`switch(opcode_id ^ _0xdaff32)` with only 2 numeric cases (1206955360 and
+1477991615), and each case recurses into `tgb` with a new opcode ID. The
+opcode is not a single byte — it's a multi-level path through the dispatch
+tree.
 
-**What's needed**: Update `extractHandlers` to find the `tgb` dispatch
-function (called from the run function) and extract handlers from its
-switch statement. The dispatch function is identifiable by:
-- It's called from the run function's loop
-- It contains a switch statement with numeric case labels
-- The switch discriminant is an XOR of the first argument with a constant
+**What's needed**: A new VM interpreter that can handle the tree-based
+dispatch pattern. This requires:
+- Decoding the dispatch tree from the `tgb` function's switch cases.
+- Following recursive calls to build the full opcode → handler mapping.
+- Interpreting opcodes as paths through the tree, not single bytes.
+- This is a significant architectural change from cfsolve's flat dispatch.
 
 ### 5. VM Program Execution (Blocking)
 Executing the orchestrator's response VM program to get the iframe URL
