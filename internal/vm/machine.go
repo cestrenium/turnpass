@@ -46,7 +46,7 @@ func (m *Machine) Disassemble(program []byte) (*Listing, error) {
 			continue
 		}
 		visited[pos] = true
-		decoded, err := m.Session.DecodeOpcode(program, item.pc, item.key)
+		decoded, err := m.Session.EvaluateDispatchLoop(program, item.pc, item.key)
 		if err != nil {
 			listing.AddFailure(Failure{PC: item.pc, Key: item.key, Cause: Cause{Kind: CauseUndecoded, Reason: err.Error()}})
 			continue
@@ -76,31 +76,8 @@ func (m *Machine) executeHandler(handler *ast.FunctionLiteral, program []byte, p
 	if handler == nil || handler.Body == nil {
 		return []Path{{Exit: Exit{Kind: ExitUnfollowed}}}
 	}
-	fields := m.Session.ConstructedFields(program)
-	ev := NewEvaluator(m.Session, program, pc, key, fields)
-	ev.Scope.Variables["this"] = MachineVal()
-	var paths []Path
-	flow, retVal, err := ev.ExecuteHandlerBody(handler)
-	if err != nil {
-		paths = []Path{{Exit: Exit{Kind: ExitThrow, Thrown: retVal.Expr()}, Effects: ev.Effects}}
-		return paths
-	}
-	var exit Exit
-	switch flow {
-	case FlowReturn:
-		exit = Exit{Kind: ExitReturn, Return: retVal.Expr()}
-	case FlowBreak:
-		exit = Exit{Kind: ExitFallthrough}
-	case FlowThrow:
-		exit = Exit{Kind: ExitThrow, Thrown: retVal.Expr()}
-	default:
-		exit = Exit{Kind: ExitFallthrough}
-	}
-	nextPC := ev.PC
-	nextKey := ev.Key
-	path := Path{Exit: exit, Effects: ev.Effects, Successors: []Position{{PC: nextPC, Key: nextKey}}}
-	paths = []Path{path}
-	return paths
+	explorer := NewPathExplorer(m.Session, program)
+	return explorer.ExploreHandler(handler, pc, key)
 }
 
 func (ev *Evaluator) ExecuteHandlerBody(fn *ast.FunctionLiteral) (FlowKind, Value, error) {
@@ -137,7 +114,7 @@ func (ev *Evaluator) ExecuteHandlerBody(fn *ast.FunctionLiteral) (FlowKind, Valu
 }
 
 func (m *Machine) Instruction(program []byte, pc uint32, key uint8) (*Instruction, error) {
-	decoded, err := m.Session.DecodeOpcode(program, pc, key)
+	decoded, err := m.Session.EvaluateDispatchLoop(program, pc, key)
 	if err != nil {
 		return nil, err
 	}
