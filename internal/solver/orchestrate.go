@@ -163,24 +163,28 @@ func (s *Solver) orchestrate(ctx context.Context, client *transport.BrowserClien
 				ray := cfChlOpt["cRay"]
 				foPath := orchReq.Options["foPath"]
 
-				// The orchestrator POST URL is:
-				// origin + /cdn-cgi/challenge-platform/h/ + variant + foPath + ray + /
+				// The orchestrator POST URL is built from:
+				//   /cdn-cgi/challenge-platform/h/<variant><foPath><ray>/<token>
+				// where foPath is /fo/<id>:<ts>:<nonce>/ (with trailing slash).
+				// The cf-chl token (cH) is appended as the final path segment.
 				if foPath != "" && ray != "" {
-					// Extract the /fo/ path components from the orchestrator.
-					// foPath looks like /fo/1269065965:1795592427:TOKEN/
-					// The POST URL is origin + /cdn-cgi/challenge-platform/h/ + variant + foPath
 					parsedURL, _ := url.Parse(pageURL)
 					origin := parsedURL.Scheme + "://" + parsedURL.Host
-					postURL := origin + "/cdn-cgi/challenge-platform/h/" + variant + foPath
+					cfChl := cfChlOpt["cH"]
+					// Ensure foPath ends with /
+					if !strings.HasSuffix(foPath, "/") {
+						foPath = foPath + "/"
+					}
+					postURL := origin + "/cdn-cgi/challenge-platform/h/" + variant + foPath + ray + "/" + cfChl
 
 					result.InitialRequest = &challenge.InitialRequest{
 						URL:     postURL,
-						CfChl:   cfChlOpt["cH"],
+						CfChl:   cfChl,
 						Ray:     ray,
 						Options: cfChlOpt,
 					}
 					sink.Progress(fmt.Sprintf("orchestrator POST URL: %s", postURL))
-					sink.Progress(fmt.Sprintf("cf-chl token: %s (ray: %s)", truncateStr(cfChlOpt["cH"], 30), ray))
+					sink.Progress(fmt.Sprintf("cf-chl token: %s (ray: %s)", truncateStr(cfChl, 30), ray))
 				}
 			}
 		}
