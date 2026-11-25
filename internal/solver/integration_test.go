@@ -89,5 +89,10 @@ func (s *testSink) Progress(msg string) {
 
 func (s *testSink) Artifact(name string, data []byte) error {
 	s.t.Logf("artifact: %s (%d bytes)", name, len(data))
+	// Save artifacts to /tmp for analysis.
+	if dir := os.Getenv("TURNPASS_DEBUG_DIR"); dir != "" {
+		os.MkdirAll(dir, 0o755)
+		os.WriteFile(dir+"/"+name, data, 0o644)
+	}
 	return nil
 }
