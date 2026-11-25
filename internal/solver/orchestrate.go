@@ -10,6 +10,7 @@ import (
 
 	"github.com/cestrenium/turnpass/internal/challenge"
 	tperr "github.com/cestrenium/turnpass/internal/errors"
+	"github.com/cestrenium/turnpass/internal/extraparams"
 	"github.com/cestrenium/turnpass/internal/transport"
 	"github.com/cestrenium/turnpass/internal/vm"
 )
@@ -58,6 +59,9 @@ type OrchestrationResult struct {
 	// VMSession is the VM session extracted from the iframe JS, if the VM
 	// class was found and a session could be created.
 	VMSession *vm.Session
+
+	// ExtraParams is the collected extraParams message for the iframe.
+	ExtraParams *extraparams.ExtraParams
 
 	// Widget is the Turnstile widget being solved.
 	Widget *Widget
@@ -237,6 +241,39 @@ func (s *Solver) orchestrate(ctx context.Context, client *transport.BrowserClien
 				} else {
 					result.EncoderParams = encParams
 					sink.Progress(fmt.Sprintf("encoder params: %s", encParams.String()))
+				}
+
+				// Collect extraParams for the iframe.
+				if widget != nil && loaderInfo != nil {
+					widgetParams := &extraparams.WidgetParams{
+						Sitekey:  widget.Sitekey,
+						Action:   widget.Action,
+						CData:    widget.CData,
+						Theme:    "auto",
+						Size:     "normal",
+						Language: "en",
+					}
+					tl := &extraparams.Timeline{
+						ScriptFetch:    90.0,
+						ImplicitRender: 1,
+						RenderStart:    1,
+						RenderEnd:      3,
+						InitStart:      498,
+						ParamsStart:    498,
+						CollectStart:   498,
+						Sent:           500,
+					}
+					ep := extraparams.Collect(
+						pageURL,
+						"widget",
+						loaderInfo.Build,
+						loaderURL,
+						widgetParams,
+						tl,
+						"managed",
+					)
+					result.ExtraParams = ep
+					sink.Progress("extraParams collected for iframe")
 				}
 			} else {
 				sink.Progress("warning: no inline JavaScript found in iframe")
