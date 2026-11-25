@@ -48,6 +48,9 @@ type Result struct {
 	RunnerResult string
 	// NewOptions lists _cf_chl_opt keys that were added by the runner call.
 	NewOptions []string
+	// CapturedStrings lists all 16-byte strings captured during the runner
+	// call via the Function.prototype.call/apply hook.
+	CapturedStrings []string
 }
 
 // ExecuteOrchestrator loads the orchestrator JavaScript into a sandboxed
@@ -127,7 +130,6 @@ func ExecuteOrchestrator(orchestratorJS, runnerName, initialProgram string, cfCh
 	}
 
 	// Call the runner with the initial program.
-	// Use a short timeout to prevent infinite loops.
 	callDone := make(chan error, 1)
 	go func() {
 		_, err := vm.RunString(fmt.Sprintf(`try{window.__runner_result=window.%s(%q);}catch(e){window.__runner_error=e.message+':'+e.stack;}`, runnerName, initialProgram))
@@ -165,42 +167,27 @@ func ExecuteOrchestrator(orchestratorJS, runnerName, initialProgram string, cfCh
 
 	// Check for runner result.
 	if resVal := windowObj.Get("__runner_result"); resVal != nil && !goja.IsUndefined(resVal) {
-		// The runner result is the key transform function (or the VM's
-		// return value). The key transform reads the secret using
-		// charCodeAt. We intercept charCodeAt to capture the secret.
 		result.RunnerResult = resVal.String()
+	}
 
-		// Try to extract the secret by calling the key transform function
-		// with a hooked charCodeAt.
-		if resVal.ExportType().String() != "string" {
-			// Override charCodeAt to capture the secret string.
-			vm.RunString(`
-                                window.__captured_strings = [];
-                                var origCharCodeAt = String.prototype.charCodeAt;
-                                String.prototype.charCodeAt = function(idx) {
-                                        if (this.length == 16) {
-                                                window.__captured_strings.push(String(this));
-                                        }
-                                        return origCharCodeAt.call(this, idx);
-                                };
-                                try {
-                                        // Call the key transform function with dummy arguments.
-                                        window.__runner_result(0, 0);
-                                } catch(e) {}
-                                String.prototype.charCodeAt = origCharCodeAt;
-                        `)
-			// Extract captured strings.
-			if caps := windowObj.Get("__captured_strings"); caps != nil {
-				if arr := caps.ToObject(vm); arr != nil {
-					for _, k := range arr.Keys() {
-						s := arr.Get(k).String()
-						if len(s) == 16 && isPrintableASCII(s) {
-							copy(result.Secret[:], s)
-							result.SecretFound = true
-							break
-						}
+	// Extract captured 16-byte string arguments from the function call hook.
+	if caps := windowObj.Get("__captured_16byte_args"); caps != nil {
+		if arr := caps.ToObject(vm); arr != nil {
+			seen := make(map[string]bool)
+			for _, k := range arr.Keys() {
+				s := arr.Get(k).String()
+				if len(s) == 16 && isPrintableASCII(s) && !seen[s] {
+					seen[s] = true
+					if !result.SecretFound {
+						copy(result.Secret[:], s)
+						result.SecretFound = true
 					}
 				}
+			}
+			// Store all captured strings for debugging.
+			result.CapturedStrings = make([]string, 0, len(seen))
+			for s := range seen {
+				result.CapturedStrings = append(result.CapturedStrings, s)
 			}
 		}
 	}
