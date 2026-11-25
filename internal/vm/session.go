@@ -123,6 +123,12 @@ func (s *Session) String() string {
 	return fmt.Sprintf("Session{layout: %+v, handlers: %d, fields: %d}", s.Layout, len(s.Handlers), len(s.Fields))
 }
 
+// Decoded holds the result of decoding one program byte.
+type Decoded struct {
+	Opcode uint8
+	Key    uint8
+}
+
 // DecodeOpcode decodes the opcode at the given program counter using the dispatch key.
 func (s *Session) DecodeOpcode(program []byte, pc uint32, key uint8) (Decoded, error) {
 	if int(pc) >= len(program) {

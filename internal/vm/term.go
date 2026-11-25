@@ -3,23 +3,23 @@ package vm
 // Term is a symbolic expression that represents a value dependent on unknown
 // registers.
 type Term struct {
-	Kind         TermKind
-	Const        Constant
-	Array        []Term
-	Object       []ObjectTerm
-	BinaryOp     BinaryOp
-	BinaryLeft   *Term
-	BinaryRight  *Term
-	UnaryOp      UnaryOp
-	UnaryExpr    *Term
-	Field        string
-	Global       string
-	ClosurePC    uint32
-	ClosureKey   uint8
+	Kind          TermKind
+	Const         Constant
+	Array         []Term
+	Object        []ObjectTerm
+	BinaryOp      BinaryOp
+	BinaryLeft    *Term
+	BinaryRight   *Term
+	UnaryOp       UnaryOp
+	UnaryExpr     *Term
+	Field         string
+	Global        string
+	ClosurePC     uint32
+	ClosureKey    uint8
 	ClosureParams []uint8
-	ClosureArity uint8
-	CellIndex    uint32
-	Opaque       string
+	ClosureArity  uint8
+	CellIndex     uint32
+	Opaque        string
 }
 
 type ObjectTerm struct {
@@ -104,20 +104,20 @@ func ConstBoolVal(b bool) Constant      { return Constant{Kind: ConstBool, Bool:
 func ConstNumberVal(n float64) Constant { return Constant{Kind: ConstNumber, Number: n} }
 func ConstStringVal(s string) Constant  { return Constant{Kind: ConstString, String: s} }
 
-func TermConstVal(c Constant) Term          { return Term{Kind: TermConst, Const: c} }
-func TermArrayVal(e []Term) Term            { return Term{Kind: TermArray, Array: e} }
-func TermObjectVal(p []ObjectTerm) Term     { return Term{Kind: TermObject, Object: p} }
+func TermConstVal(c Constant) Term      { return Term{Kind: TermConst, Const: c} }
+func TermArrayVal(e []Term) Term        { return Term{Kind: TermArray, Array: e} }
+func TermObjectVal(p []ObjectTerm) Term { return Term{Kind: TermObject, Object: p} }
 func TermBinaryVal(op BinaryOp, l, r Term) Term {
 	return Term{Kind: TermBinary, BinaryOp: op, BinaryLeft: &l, BinaryRight: &r}
 }
 func TermUnaryVal(op UnaryOp, e Term) Term {
 	return Term{Kind: TermUnary, UnaryOp: op, UnaryExpr: &e}
 }
-func TermFieldVal(f string) Term    { return Term{Kind: TermField, Field: f} }
-func TermGlobalVal(p string) Term   { return Term{Kind: TermGlobal, Global: p} }
-func TermOpaqueVal(t string) Term   { return Term{Kind: TermOpaque, Opaque: t} }
-func TermCellsVal() Term            { return Term{Kind: TermCells} }
-func TermCellVal(i uint32) Term     { return Term{Kind: TermCell, CellIndex: i} }
+func TermFieldVal(f string) Term  { return Term{Kind: TermField, Field: f} }
+func TermGlobalVal(p string) Term { return Term{Kind: TermGlobal, Global: p} }
+func TermOpaqueVal(t string) Term { return Term{Kind: TermOpaque, Opaque: t} }
+func TermCellsVal() Term          { return Term{Kind: TermCells} }
+func TermCellVal(i uint32) Term   { return Term{Kind: TermCell, CellIndex: i} }
 
 func (v Value) Expr() Term {
 	switch v.Kind {
