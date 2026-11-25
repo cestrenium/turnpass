@@ -18,7 +18,10 @@ import (
 	"time"
 
 	"github.com/cestrenium/turnpass/internal/browserprofile"
+	"github.com/cestrenium/turnpass/internal/codec"
 	tperr "github.com/cestrenium/turnpass/internal/errors"
+	"github.com/cestrenium/turnpass/internal/extraparams"
+	"github.com/cestrenium/turnpass/internal/payload"
 	"github.com/cestrenium/turnpass/internal/protocol"
 	"github.com/cestrenium/turnpass/internal/transport"
 )
@@ -183,14 +186,70 @@ func (s *Solver) SolveTurnstile(ctx context.Context, req Turnstile, opts Options
 		sink.Artifact("orchestrator.js", []byte(orchResult.OrchestratorScript))
 	}
 
-	// The challenge-program VM (the obfuscated JS interpreter that produces
-	// the probe answers Cloudflare expects) is the largest single piece of
-	// cfsolve and is being ported incrementally. Until it is complete, we
-	// cannot execute the live challenge program. We surface this honestly.
+	// Attempt to build and send the first payload if we have all the pieces.
+	if orchResult.InitialRequest != nil && orchResult.EncoderParams != nil &&
+		s.browser.ParsedAnswers != nil {
+		sink.Progress("attempting first payload construction and POST")
+
+		// Build the first payload from answers and extraParams.
+		var ep *extraparams.ExtraParams
+		if orchResult.ExtraParams != nil {
+			ep = orchResult.ExtraParams
+		}
+		options := make(map[string]interface{})
+		if orchResult.InitialRequest != nil {
+			options["cf_chl"] = orchResult.InitialRequest.CfChl
+			options["ray"] = orchResult.InitialRequest.Ray
+		}
+
+		p, err := payload.BuildFirstPayload(s.browser.ParsedAnswers, ep, options)
+		if err != nil {
+			sink.Progress(fmt.Sprintf("warning: could not build first payload: %v", err))
+		} else {
+			sink.Progress(fmt.Sprintf("first payload: %d fields", p.Len()))
+
+			// Encode the payload using the codec.
+			codec, err := codec.NewCodec(
+				orchResult.EncoderParams.Alphabet,
+				orchResult.EncoderParams.Modulus,
+				orchResult.EncoderParams.Secret,
+			)
+			if err != nil {
+				sink.Progress(fmt.Sprintf("warning: could not create codec: %v", err))
+			} else {
+				payloadJSON, _ := p.MarshalJSON()
+				encoded, err := codec.Encode(payloadJSON)
+				if err != nil {
+					sink.Progress(fmt.Sprintf("warning: could not encode payload: %v", err))
+				} else {
+					sink.Progress(fmt.Sprintf("encoded payload: %d chars", len(encoded)))
+
+					// POST the payload to the challenge URL.
+					postResult, err := PostChallenge(ctx, client, orchResult.InitialRequest,
+						orchResult.IframeURL, encoded, StageInitial, sink)
+					if err != nil {
+						sink.Progress(fmt.Sprintf("warning: POST failed: %v", err))
+					} else {
+						sink.Progress(fmt.Sprintf("POST result: status=%d, program=%d bytes",
+							postResult.Status, len(postResult.Program)))
+						if len(postResult.Program) > 0 {
+							sink.Artifact("first-response-program.bin", postResult.Program)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// The challenge-program VM cannot yet execute real challenge programs
+	// because the orchestrator/iframe JS requires full deobfuscation to
+	// extract the VM class, encoding constants, and initial program.
 	return "", tperr.NewUnsupported(fmt.Errorf(
-		"turnstile token acquisition requires the challenge-program VM, " +
-			"which is not yet ported; HTTP orchestration completed successfully " +
-			"(loader, iframe, and inline JS fetched); see KNOWN_LIMITATIONS.md on the docs branch"))
+		"challenge VM execution requires fully deobfuscated JS; " +
+			"HTTP orchestration, deobfuscation, codec, payload, and POST " +
+			"infrastructure are complete; the remaining gap is extracting " +
+			"the VM class and encoding constants from deobfuscated JS; " +
+			"see KNOWN_LIMITATIONS.md on the docs branch"))
 }
 
 // Clear navigates to the page and clears the Cloudflare challenge.
