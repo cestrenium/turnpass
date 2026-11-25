@@ -25,6 +25,7 @@ import (
 	"github.com/cestrenium/turnpass/internal/payload"
 	"github.com/cestrenium/turnpass/internal/protocol"
 	"github.com/cestrenium/turnpass/internal/transport"
+	"github.com/cestrenium/turnpass/internal/vmexec"
 )
 
 // OutcomeKind is the kind of result a solve produced.
@@ -321,13 +322,47 @@ func (s *Solver) clearFrom(ctx context.Context, pageURL string, opts Options, fe
 	if orchResult.InitialRequest != nil && orchResult.EncoderParams != nil {
 		sink.Progress("attempting orchestrator POST")
 
-		// Build a minimal first payload from _cf_chl_opt values.
+		// Try the goja-based encoder first (produces correct payload
+		// structure with the real VM-computed key transform).
+		if orchResult.EncoderParams.RunnerName != "" && orchResult.EncoderParams.InitialProgram != "" && orchResult.EncoderParams.Encoder != "" {
+			sink.Progress("attempting goja-based payload encoding")
+			encResult, err := vmexec.EncodePayload(
+				orchResult.OrchestratorScript,
+				orchResult.EncoderParams.RunnerName,
+				orchResult.EncoderParams.InitialProgram,
+				orchResult.EncoderParams.Encoder,
+				orchResult.InitialRequest.Options,
+			)
+			if err != nil {
+				sink.Progress(fmt.Sprintf("warning: goja encoding failed: %v", err))
+			} else if encResult.EncodedPayload != "" {
+				sink.Progress(fmt.Sprintf("goja-encoded payload: %d chars", len(encResult.EncodedPayload)))
+
+				// POST the goja-encoded payload.
+				postResult, err := PostChallenge(ctx, client, orchResult.InitialRequest,
+					orchResult.PageURL, encResult.EncodedPayload, StageOrchestrator, sink)
+				if err != nil {
+					sink.Progress(fmt.Sprintf("warning: orchestrator POST failed: %v", err))
+				} else {
+					sink.Progress(fmt.Sprintf("orchestrator POST result: status=%d, program=%d bytes",
+						postResult.Status, len(postResult.Program)))
+					if len(postResult.Program) > 0 {
+						sink.Artifact("orchestrator-response-program.bin", postResult.Program)
+					}
+					if postResult.Status == 200 {
+						sink.Progress("orchestrator POST succeeded with HTTP 200!")
+						// TODO: execute the response VM program to get the iframe URL
+					}
+				}
+			}
+		}
+
+		// Fall back to the codec-based encoding if goja encoding didn't produce a payload.
 		cfChlOpt := orchResult.InitialRequest.Options
 		options := make(map[string]interface{})
 		for k, v := range cfChlOpt {
 			options[k] = v
 		}
-		// Add frame check results (false for top-level page).
 		options["frame_top"] = false
 		options["frame_self"] = false
 

@@ -288,13 +288,24 @@ func extractRunnerViaRegex(src string, params *EncoderParams) {
 	if params.RunnerName != "" {
 		return
 	}
-	m := rxRunnerInstall.FindStringSubmatch(src)
-	if len(m) >= 6 {
+	// Flexible pattern: NAME=function(VAR){return RUN(new CLASS(VAR),...,...,[])}
+	// Handles XOR expressions and variable references in the numeric arguments.
+	// We only capture NAME, RUN, and CLASS — pc and key are evaluated by goja.
+	rxRunner := regexp.MustCompile(`(\w+)\s*=\s*function\s*\(\s*\w+\s*\)\s*\{\s*return\s+(\w+)\s*\(\s*[^,]*,\s*new\s+(\w+)\s*\(\s*\w+\s*\)\s*,`)
+	m := rxRunner.FindStringSubmatch(src)
+	if len(m) >= 4 {
 		params.RunnerName = m[1]
 		params.RunFunc = m[2]
 		params.VMClass = m[3]
-		fmt.Sscanf(m[4], "%f", &params.InitialPC)
-		fmt.Sscanf(m[5], "%f", &params.InitialKey)
+		return
+	}
+	// Try standard order: NAME=function(VAR){return RUN(new CLASS(VAR),NUM,NUM,[])}
+	rxRunner2 := regexp.MustCompile(`(\w+)\s*=\s*function\s*\(\s*\w+\s*\)\s*\{\s*return\s+(\w+)\s*\(\s*new\s+(\w+)\s*\(\s*\w+\s*\)\s*,`)
+	m = rxRunner2.FindStringSubmatch(src)
+	if len(m) >= 4 {
+		params.RunnerName = m[1]
+		params.RunFunc = m[2]
+		params.VMClass = m[3]
 	}
 }
 
