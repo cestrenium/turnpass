@@ -58,7 +58,11 @@ func TestPostChallengeSuccess(t *testing.T) {
     "profile": "chrome",
     "platform": "desktop",
     "headers": {"User-Agent": "TestUA/1.0"},
-    "requests": {"headers": {"navigation": ["user-agent"], "challenge_post": ["user-agent"]}}
+    "requests": {"headers": {
+      "navigation": ["user-agent"],
+      "challenge_post": ["accept: */*", "content-type: text/plain;charset=UTF-8", "sec-fetch-site: same-origin", "origin", "cf-chl", "content-length", "sec-fetch-mode: cors", "user-agent", "referer", "sec-fetch-dest: empty", "cf-chl-ra: 0", "accept-language: en-US,en;q=0.9", "priority: u=3, i", "accept-encoding: gzip, deflate, br, zstd"],
+      "orchestrator_post": ["accept: */*", "content-type: text/plain;charset=UTF-8", "sec-fetch-site: same-origin", "origin", "cf-chl", "content-length", "sec-fetch-mode: cors", "user-agent", "referer", "sec-fetch-dest: empty", "cf-chl-ra: 0", "accept-language: en-US,en;q=0.9", "priority: u=3, i", "accept-encoding: gzip, deflate, br, zstd"]
+    }}
   },
   "timeline": {}, "intervals": {}, "orchestrator": {},
   "resource_timing": {}, "interaction": {}, "second": {}
@@ -108,7 +112,11 @@ func TestPostChallengeNon200(t *testing.T) {
     "profile": "chrome",
     "platform": "desktop",
     "headers": {"User-Agent": "TestUA/1.0"},
-    "requests": {"headers": {"navigation": ["user-agent"], "challenge_post": ["user-agent"]}}
+    "requests": {"headers": {
+      "navigation": ["user-agent"],
+      "challenge_post": ["accept: */*", "content-type: text/plain;charset=UTF-8", "sec-fetch-site: same-origin", "origin", "cf-chl", "content-length", "sec-fetch-mode: cors", "user-agent", "referer", "sec-fetch-dest: empty", "cf-chl-ra: 0", "accept-language: en-US,en;q=0.9", "priority: u=3, i", "accept-encoding: gzip, deflate, br, zstd"],
+      "orchestrator_post": ["accept: */*", "content-type: text/plain;charset=UTF-8", "sec-fetch-site: same-origin", "origin", "cf-chl", "content-length", "sec-fetch-mode: cors", "user-agent", "referer", "sec-fetch-dest: empty", "cf-chl-ra: 0", "accept-language: en-US,en;q=0.9", "priority: u=3, i", "accept-encoding: gzip, deflate, br, zstd"]
+    }}
   },
   "timeline": {}, "intervals": {}, "orchestrator": {},
   "resource_timing": {}, "interaction": {}, "second": {}
