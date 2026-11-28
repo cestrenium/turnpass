@@ -130,7 +130,7 @@ encoder's enclosing IIFE, where `VAR` is called as a function in the
 encoder body. The `NAME` is the key transform name (which maps to the
 secret in `installed.built`).
 
-### 4. VM Execution via Goja Sandbox (BREAKTHROUGH — Partially Working)
+### 4. VM Execution via Goja Sandbox (BREAKTHROUGH — Secret Captured)
 Instead of building a tree-based dispatch VM interpreter, we use goja
 to execute the real orchestrator JavaScript in a sandboxed environment.
 
@@ -139,20 +139,28 @@ to execute the real orchestrator JavaScript in a sandboxed environment.
 2. Calls the runner with the initial VM program
 3. The runner returns the key transform function (e.g. `function(){return zc(gF,gU)}`)
 4. Installs the key transform under the missing global name (found via
-   ReferenceError capture)
-5. Calls the encoder to produce the encoded payload
-6. The encoder produces an 8738-char payload (vs 610 from codec) — the
-   correct payload structure with all VM-computed fields
+   ReferenceError capture, iteratively up to 10 missing globals)
+5. Calls the encoder to produce the encoded payload (9438 chars)
+6. Captures the 16-byte key-transform secret via charCodeAt hook:
+   `isaDlLiDJcEcTCYn` (hex: 697361446c4c69444a6345635443596e)
 
-**Remaining issue**: The VM execution is incomplete — the key transform
-function throws a TypeError when called (the VM dispatch hits a missing
-browser API at `z2`). This means the key transform doesn't work correctly,
-and the payload is encrypted with a wrong key. The server returns HTTP 400
-with an encrypted error body.
+**Secret capture method**: The charCodeAt hook is installed after the
+orchestrator loads and the runner is called, but before encoder calls.
+This avoids interfering with the orchestrator's internal string operations.
+The hook captures any 16-char string accessed via charCodeAt, filtering
+for printable ASCII and excluding known _cf_chl_opt values.
 
-**What's needed**: Add more browser API stubs so the VM dispatch completes
-without errors. The specific API that's missing can be found by examining
-the TypeError stack trace and checking what `z2` (or equivalent) accesses.
+**Remaining issue**: The key transform throws a TypeError when called
+(the VM dispatch hits a missing browser API at a type-check function
+like `Oj`). The encoder catches the error and produces a payload with
+wrong encryption. The server returns HTTP 400.
+
+**What's needed**: The plaintext JSON payload to re-encrypt with our Go
+codec using the captured secret. The JSON.stringify hook broke the
+encoder, so an alternative is needed:
+- Hook the encoder's internal encryption function directly
+- Or extract the payload template from the AST and evaluate it
+- Or fix the TypeError by stubbing the missing browser API
 
 ### 5. VM Program Execution (Blocking)
 Executing the orchestrator's response VM program to get the iframe URL
