@@ -162,31 +162,10 @@ func ExecuteOrchestrator(orchestratorJS, runnerName, initialProgram string, cfCh
 		return result, fmt.Errorf("runner %q not found on window or any global object", runnerName)
 	}
 
-	// Patch the type-check functions to not throw on undefined.
-	// The VM's key transform calls type-check functions like:
-	//   function N0(VAR){if(typeof VAR!=="object")throw new TypeError;return VAR}
-	// When a VM closure variable is undefined (because the IIFE initialization
-	// failed silently), these throw TypeError, causing the encoder to return
-	// empty string. By patching these to return a default object for undefined,
-	// the VM dispatch continues and the encoder can produce a payload.
-	//
-	// We can't patch the closure variables directly (they're in the IIFE scope),
-	// but we CAN patch the type-check functions which are global. The encoder
-	// catches the TypeError from the key transform, so if we prevent the throw,
-	// the encoder will use the default object value (0) for the undefined
-	// variable, producing a payload with wrong encryption but correct structure.
-	//
-	// This is a trade-off: the payload will have wrong encryption (the key
-	// transform used 0 instead of the correct value), but the structure is
-	// correct. Combined with the AST-based template extraction + Go codec
-	// (which uses the correct secret), this gives us two independent attempts.
-	vm.RunString(`
-                // Override the type-check pattern globally. We can't patch specific
-                // functions (they're closure variables), but we can make the VM's
-                // internal error handling more permissive by wrapping the encoder call.
-                // The encoder itself catches errors from the key transform, so we just
-                // need to make sure the encoder produces SOMETHING.
-        `)
+	// The VM's type-check functions throw TypeError when a property is
+	// undefined. We can't patch them (they're closure variables).
+	// The real fix is stubbing all browser APIs the IIFE needs.
+	// The new browser API stubs below should help the IIFE complete.
 
 	// Snapshot window keys before the runner call.
 	beforeKeys := make(map[string]bool)
@@ -861,6 +840,178 @@ func setupSandbox(vm *goja.Runtime, cfChlOptValues map[string]string) *goja.Obje
 
 	// Set up BigInt support (goja may need this)
 	// goja supports BigInt natively via goja.BigInt()
+
+	// PerformanceObserver — the orchestrator accesses this.
+	vm.Set("PerformanceObserver", func(call goja.ConstructorCall) *goja.Object {
+		this := call.This
+		this.Set("observe", func() {})
+		this.Set("disconnect", func() {})
+		this.Set("takeRecords", func() *goja.Object { return vm.NewArray() })
+		return nil
+	})
+
+	// ReadableStream — used by the orchestrator.
+	vm.Set("ReadableStream", func(call goja.ConstructorCall) *goja.Object {
+		this := call.This
+		this.Set("getReader", func() *goja.Object {
+			reader := vm.NewObject()
+			reader.Set("read", func() *goja.Promise {
+				p, _, _ := vm.NewPromise()
+				return p
+			})
+			reader.Set("cancel", func() {})
+			reader.Set("releaseLock", func() {})
+			return reader
+		})
+		this.Set("cancel", func() {})
+		this.Set("pipeTo", func() {})
+		this.Set("tee", func() *goja.Object { return vm.NewArray() })
+		return nil
+	})
+
+	// Reflect — the orchestrator uses Reflect.apply and Reflect.construct.
+	reflectObj := vm.NewObject()
+	reflectObj.Set("apply", func(call goja.FunctionCall) goja.Value {
+		// Use goja's built-in function call mechanism
+		if len(call.Arguments) >= 3 {
+			fn := call.Arguments[0]
+			thisArg := call.Arguments[1]
+			args := call.Arguments[2]
+			if fn != nil && !goja.IsUndefined(fn) {
+				// Store in temp vars and use Function.prototype.apply
+				windowObj.Set("__reflect_fn", fn)
+				windowObj.Set("__reflect_this", thisArg)
+				windowObj.Set("__reflect_args", args)
+				result, _ := vm.RunString(`
+                                        try {
+                                                var fn = window.__reflect_fn;
+                                                var thisArg = window.__reflect_this;
+                                                var args = window.__reflect_args;
+                                                if (args && args.length !== undefined) {
+                                                        var argArray = [];
+                                                        for (var i = 0; i < args.length; i++) {
+                                                                argArray.push(args[i]);
+                                                        }
+                                                        return fn.apply(thisArg, argArray);
+                                                }
+                                                return fn.call(thisArg);
+                                        } catch(e) {
+                                                return undefined;
+                                        }
+                                `)
+				return result
+			}
+		}
+		return goja.Undefined()
+	})
+	reflectObj.Set("construct", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			target := call.Arguments[0]
+			if target != nil && !goja.IsUndefined(target) {
+				return target.ToObject(vm)
+			}
+		}
+		return goja.Undefined()
+	})
+	reflectObj.Set("get", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			obj := call.Arguments[0].ToObject(vm)
+			key := call.Arguments[1].String()
+			return obj.Get(key)
+		}
+		return goja.Undefined()
+	})
+	reflectObj.Set("has", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			obj := call.Arguments[0].ToObject(vm)
+			key := call.Arguments[1].String()
+			for _, k := range obj.Keys() {
+				if k == key {
+					return vm.ToValue(true)
+				}
+			}
+		}
+		return vm.ToValue(false)
+	})
+	reflectObj.Set("ownKeys", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 1 {
+			obj := call.Arguments[0].ToObject(vm)
+			keys := obj.Keys()
+			arr := make([]interface{}, len(keys))
+			for i, k := range keys {
+				arr[i] = k
+			}
+			return vm.ToValue(arr)
+		}
+		return vm.NewArray()
+	})
+	reflectObj.Set("getPrototypeOf", func(call goja.FunctionCall) goja.Value {
+		return goja.Null()
+	})
+	reflectObj.Set("getOwnPropertyDescriptor", func(call goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
+	vm.Set("Reflect", reflectObj)
+
+	// Typed arrays — only stub if goja doesn't already have them.
+	// Goja has built-in typed array support, so we only add stubs for
+	// any that might be missing.
+	if vm.Get("Uint8Array") == nil || goja.IsUndefined(vm.Get("Uint8Array")) {
+		vm.Set("Uint8Array", func(call goja.ConstructorCall) *goja.Object {
+			this := call.This
+			this.Set("length", 0)
+			this.Set("byteLength", 0)
+			this.Set("byteOffset", 0)
+			this.Set("buffer", vm.NewObject())
+			this.Set("set", func() {})
+			this.Set("subarray", func() *goja.Object { return this })
+			this.Set("slice", func() *goja.Object { return this })
+			return nil
+		})
+	}
+	if vm.Get("Float64Array") == nil || goja.IsUndefined(vm.Get("Float64Array")) {
+		vm.Set("Float64Array", func(call goja.ConstructorCall) *goja.Object {
+			this := call.This
+			this.Set("length", 0)
+			this.Set("byteLength", 0)
+			this.Set("byteOffset", 0)
+			this.Set("buffer", vm.NewObject())
+			this.Set("set", func() {})
+			this.Set("setFloat64", func() {})
+			this.Set("subarray", func() *goja.Object { return this })
+			return nil
+		})
+	}
+	if vm.Get("DataView") == nil || goja.IsUndefined(vm.Get("DataView")) {
+		vm.Set("DataView", func(call goja.ConstructorCall) *goja.Object {
+			this := call.This
+			this.Set("byteLength", 0)
+			this.Set("byteOffset", 0)
+			this.Set("buffer", vm.NewObject())
+			this.Set("getFloat64", func() float64 { return 0 })
+			this.Set("setFloat64", func() {})
+			this.Set("getInt32", func() int32 { return 0 })
+			this.Set("setInt32", func() {})
+			this.Set("getUint8", func() uint8 { return 0 })
+			this.Set("setUint8", func() {})
+			return nil
+		})
+	}
+
+	// Map, Set, WeakMap, WeakSet — goja has these built in but make sure they're accessible.
+	// Symbol — goja has this built in.
+
+	// matchMedia — returns an object with matches property.
+	windowObj.Set("matchMedia", func(query string) *goja.Object {
+		mql := vm.NewObject()
+		mql.Set("matches", false)
+		mql.Set("media", query)
+		mql.Set("onchange", nil)
+		mql.Set("addEventListener", func() {})
+		mql.Set("removeEventListener", func() {})
+		return mql
+	})
+	vm.Set("matchMedia", windowObj.Get("matchMedia"))
 
 	return windowObj
 }
