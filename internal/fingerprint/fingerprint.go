@@ -28,17 +28,20 @@ const (
 
 // Fingerprint is the parsed profile file.
 type Fingerprint struct {
-	Engine               Engine           `json:"engine"`
-	Transport            TransportSection `json:"transport"`
-	Browser              Layout           `json:"browser"`
-	Timeline             json.RawMessage  `json:"timeline"`
-	Intervals            json.RawMessage  `json:"intervals"`
-	Orchestrator         json.RawMessage  `json:"orchestrator"`
-	ResourceTiming       json.RawMessage  `json:"resource_timing"`
-	Interaction          json.RawMessage  `json:"interaction"`
-	Second               json.RawMessage  `json:"second"`
-	Answers              string           `json:"answers,omitempty"`
-	ChallengePageAnswers string           `json:"challenge_page_answers,omitempty"`
+	Engine    Engine           `json:"engine"`
+	Transport TransportSection `json:"transport"`
+	Browser   Layout           `json:"browser"`
+	Timeline  json.RawMessage  `json:"timeline"`
+	// ChallengePageTimeline holds loader timestamps for widgets a challenge
+	// page's orchestrator renders. Optional; falls back to Timeline.
+	ChallengePageTimeline json.RawMessage `json:"challenge_page_timeline,omitempty"`
+	Intervals             json.RawMessage `json:"intervals"`
+	Orchestrator          json.RawMessage `json:"orchestrator"`
+	ResourceTiming        json.RawMessage `json:"resource_timing"`
+	Interaction           json.RawMessage `json:"interaction"`
+	Second                json.RawMessage `json:"second"`
+	Answers               string          `json:"answers,omitempty"`
+	ChallengePageAnswers  string          `json:"challenge_page_answers,omitempty"`
 }
 
 // TransportSection is the fingerprint's transport block.

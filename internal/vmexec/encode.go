@@ -70,10 +70,10 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
 	}
 
 	// Search for the send(encoderName( pattern in the deobfuscated source.
-	// Pattern: [...=`send`)](ENCODER(
+	// Pattern: [...=`send`)](ENCODER( or [...=`send`](ENCODER(
 	// The `send` may be inside a lazy-init: VAR||(VAR=`send`)
-	// We match: `send`)]( followed by a function name and (
-	rxSendCall := regexp.MustCompile("`send`\\)]\\(([a-zA-Z_$][\\w$]*)\\(")
+	// We match: `send` followed by )] or ] then ( followed by a function name and (
+	rxSendCall := regexp.MustCompile("`send`\\)?]\\(([a-zA-Z_$][\\w$]*)\\(")
 	sendMatch := rxSendCall.FindStringSubmatch(deobfSrc)
 	src := orchestratorJS // use raw source for goja execution
 	if len(sendMatch) >= 2 {
@@ -81,6 +81,8 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
 		encoderFromSend := sendMatch[1]
 		// Find the encoder's assignment in the RAW source and modify it.
 		// Use a word-boundary regex to find the exact assignment.
+		// This is safe even for single-char names because the send call
+		// uniquely identified this function as the encoder.
 		rxEnc := regexp.MustCompile(`\b` + regexp.QuoteMeta(encoderFromSend) + `\s*=\s*function\s*\(`)
 		if loc := rxEnc.FindStringIndex(src); loc != nil {
 			src = src[:loc[0]] +
@@ -88,7 +90,8 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
 				src[loc[1]:]
 		}
 	} else if len(encoderName) > 1 {
-		// Fallback: use the encoder name from AST analysis.
+		// Fallback: use the encoder name from AST analysis (only for
+		// multi-char names to avoid false positives).
 		rx := regexp.MustCompile(`\b` + regexp.QuoteMeta(encoderName) + `\s*=\s*function\s*\(`)
 		if loc := rx.FindStringIndex(src); loc != nil {
 			src = src[:loc[0]] +
@@ -218,9 +221,8 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
 	}
 
 	// If no payload was captured, try installing the runner result as the
-	// missing global and triggering the encoder by calling send-related
-	// functions. The orchestrator's IIFE may have a deferred send that
-	// wasn't triggered because the VM didn't complete.
+	// missing global and triggering the encoder. We iteratively find and
+	// install missing globals until the encoder succeeds or we hit a limit.
 	if result.EncodedPayload == "" {
 		// Install the runner result on all undefined hex globals.
 		hexGlobals := []string{}
@@ -229,37 +231,62 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
 				hexGlobals = append(hexGlobals, k)
 			}
 		}
-		// Find missing globals via ReferenceError and install the runner result.
-		missingResult, _ := vm.RunString(`
-                        try {
-                                // Try to trigger the encoder by accessing _cf_chl_opt properties
-                                // that the VM should have set up.
-                                var opts = window._cf_chl_opt;
-                                // Look for any function on opts that might be the encoder trigger.
-                                var keys = Object.keys(opts);
-                                for (var i = 0; i < keys.length; i++) {
-                                        try {
-                                                var v = opts[keys[i]];
-                                                if (typeof v === 'function') {
-                                                        v();
-                                                }
-                                        } catch(e) {
-                                                var msg = e.message || String(e);
-                                                var m = msg.match(/([a-f0-9_]{25,}) is not defined/);
-                                                if (m) {
-                                                        window.__missing = m[1];
-                                                }
-                                        }
-                                }
-                        } catch(e) {}
-                `)
-		_ = missingResult
 
-		// Install the runner result under the missing global name.
-		if missingVal := windowObj.Get("__missing"); missingVal != nil && !goja.IsUndefined(missingVal) {
-			missingGlobal := missingVal.String()
-			if missingGlobal != "" && missingGlobal != "undefined" {
-				vm.RunString(fmt.Sprintf(`window.%s = window.__runner_result;`, missingGlobal))
+		// Iteratively find missing globals and install the runner result.
+		// The encoder may need multiple VM-installed globals that weren't
+		// set up because the VM didn't complete. We install the runner
+		// result (the key transform function) under each missing name.
+		for attempt := 0; attempt < 10; attempt++ {
+			// Call the encoder and capture the ReferenceError.
+			missingResult, _ := vm.RunString(`
+                                try {
+                                        if (window.__encoder) {
+                                                window.__encoder(window._cf_chl_opt);
+                                        }
+                                } catch(e) {
+                                        var msg = e.message || String(e);
+                                        var m = msg.match(/(_[a-f0-9]{24}) is not defined/);
+                                        if (m) m[1]; else '';
+                                }
+                        `)
+			missingGlobal := ""
+			if missingResult != nil {
+				missingGlobal = missingResult.String()
+			}
+			if missingGlobal == "" || missingGlobal == "undefined" {
+				break // no more missing globals
+			}
+
+			// Install the runner result under the missing global name.
+			vm.RunString(fmt.Sprintf(`window.%s = window.__runner_result;`, missingGlobal))
+
+			// Check if the encoder now produces a payload (via return or throw).
+			encResult, _ := vm.RunString(`
+                                try {
+                                        var result = window.__encoder(window._cf_chl_opt);
+                                        if (result !== undefined && result !== null) {
+                                                JSON.stringify({type: 'return', value: String(result)});
+                                        } else {
+                                                '{"type":"return","value":""}';
+                                        }
+                                } catch(e) {
+                                        JSON.stringify({type: 'throw', value: String(e), length: String(e).length, name: e.name, message: e.message});
+                                }
+                        `)
+			if encResult != nil {
+				s := encResult.String()
+				result.EncoderCallResult = s
+				// If the result is long enough, it's likely the payload.
+				if len(s) > 200 {
+					result.EncodedPayload = s
+					break
+				}
+			}
+
+			// Check XHR hook.
+			if payloadVal := windowObj.Get("__captured_payload"); payloadVal != nil && !goja.IsUndefined(payloadVal) && !goja.IsNull(payloadVal) {
+				result.EncodedPayload = payloadVal.String()
+				break
 			}
 		}
 
