@@ -23,6 +23,8 @@ import (
 
 	"github.com/dop251/goja/ast"
 	"github.com/dop251/goja/token"
+
+	"github.com/cestrenium/turnpass/internal/deobfuscate"
 )
 
 // EncoderParams holds the session's encoding constants extracted from the
@@ -102,6 +104,16 @@ func ExtractEncoderParams(iframeJS string) (*EncoderParams, error) {
 	// AST analysis doesn't prevent the regex fallback from running.
 	if params.InitialProgram == "" && params.RunnerName != "" {
 		params.InitialProgram = findRunnerCallViaRegex(iframeJS, params.RunnerName)
+	}
+
+	// If the AST analysis didn't find the encoder name, try the send-call
+	// regex on the deobfuscated source. The send call pattern is:
+	//   [...=`send`](ENCODER(...))
+	// This is more reliable than AST analysis for finding the encoder.
+	if params.Encoder == "" {
+		if deobf, err := deobfuscate.DeobfuscateWithInlining(iframeJS); err == nil {
+			params.Encoder = findEncoderViaSendCall(deobf)
+		}
 	}
 
 	// Validate that we found the required parameters.
@@ -330,6 +342,22 @@ func extractRunnerViaRegex(src string, params *EncoderParams) {
 		params.RunFunc = m[2]
 		params.VMClass = m[3]
 	}
+}
+
+// findEncoderViaSendCall finds the encoder function name by searching for
+// the send() call pattern in the deobfuscated source:
+//
+//	[...=`send`](ENCODER(...))
+//
+// or [...=`send`)](ENCODER(...))
+// The `send` may be inside a lazy-init: VAR||(VAR=`send`)
+func findEncoderViaSendCall(deobfSrc string) string {
+	rxSendCall := regexp.MustCompile("`send`\\)?]\\(([a-zA-Z_$][\\w$]*)\\(")
+	m := rxSendCall.FindStringSubmatch(deobfSrc)
+	if len(m) >= 2 {
+		return m[1]
+	}
+	return ""
 }
 
 // findRunnerCallViaRegex is a regex fallback for finding the base64-encoded

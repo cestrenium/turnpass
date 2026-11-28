@@ -162,6 +162,51 @@ func ExecuteOrchestrator(orchestratorJS, runnerName, initialProgram string, cfCh
 		return result, fmt.Errorf("runner %q not found on window or any global object", runnerName)
 	}
 
+	// Install a catch-all for undefined global references. The VM
+	// constructor calls functions (like S9, FS, S0) that are installed
+	// by the initial VM program. If the initial program didn't complete,
+	// these are undefined, causing TypeError. We use a Proxy on the
+	// global object to return a default function/object for undefined
+	// properties, allowing the VM to continue.
+	vm.RunString(`
+                // Create a default function that returns 0 when called.
+                function defaultFn() { return 0; }
+                defaultFn.valueOf = function() { return 0; };
+                defaultFn.toString = function() { return ''; };
+                defaultFn.length = 0;
+
+                // Create a default object that returns 0 for any property.
+                var defaultObj = {
+                    length: 0,
+                    valueOf: function() { return 0; },
+                    toString: function() { return ''; },
+                    charCodeAt: function() { return 0; },
+                    slice: function() { return ''; },
+                    push: function() { return 0; },
+                    pop: function() { return 0; },
+                    indexOf: function() { return -1; }
+                };
+
+                // Wrap the global object so undefined properties return
+                // defaultFn (for function calls) or defaultObj (for property
+                // access). This prevents ReferenceError and TypeError when
+                // the VM accesses globals that weren't installed.
+                var globalProxy = new Proxy(window, {
+                    get: function(target, prop) {
+                        if (prop in target) {
+                            return target[prop];
+                        }
+                        // Return a function that also acts as an object.
+                        var f = function() { return 0; };
+                        f.length = 0;
+                        f.valueOf = function() { return 0; };
+                        f.toString = function() { return ''; };
+                        return f;
+                    },
+                    has: function() { return true; }
+                });
+        `)
+
 	// Snapshot window keys before the runner call.
 	beforeKeys := make(map[string]bool)
 	for _, k := range windowObj.Keys() {

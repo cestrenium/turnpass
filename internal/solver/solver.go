@@ -325,7 +325,11 @@ func (s *Solver) clearFrom(ctx context.Context, pageURL string, opts Options, fe
 		// Try the goja-based encoder first (produces correct payload
 		// structure with the real VM-computed key transform).
 		var gojaEncResult *vmexec.EncodePayloadResult
-		if orchResult.EncoderParams.RunnerName != "" && orchResult.EncoderParams.InitialProgram != "" && orchResult.EncoderParams.Encoder != "" {
+		// Always try the goja encoder when we have a runner and initial
+		// program. The EncodePayload function does its own send-call
+		// based encoder discovery, so it works even when the AST
+		// analysis didn't find the encoder name.
+		if orchResult.EncoderParams.RunnerName != "" && orchResult.EncoderParams.InitialProgram != "" {
 			sink.Progress("attempting goja-based payload encoding")
 			encResult, err := vmexec.EncodePayload(
 				orchResult.OrchestratorScript,
