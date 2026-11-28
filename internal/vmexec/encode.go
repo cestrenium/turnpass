@@ -35,6 +35,10 @@ type EncodePayloadResult struct {
 	// EncoderCallResult is the raw result of calling the encoder (for
 	// debugging). This is a JSON string with type/value/length fields.
 	EncoderCallResult string
+	// VmOptions is the _cf_chl_opt object after the orchestrator loaded,
+	// including VM-installed renamed properties. These can be used by the
+	// AST-based expression evaluator.
+	VmOptions map[string]string
 }
 
 // EncodePayload loads the orchestrator JS into a sandboxed goja runtime,
@@ -404,6 +408,21 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
 				if !result.SecretFound {
 					copy(result.Secret[:], s)
 					result.SecretFound = true
+				}
+			}
+		}
+	}
+
+	// Extract the _cf_chl_opt options from the VM (includes VM-installed
+	// renamed properties). These can be used by the AST-based expression
+	// evaluator to evaluate payload template fields.
+	result.VmOptions = make(map[string]string)
+	if cfOpt := windowObj.Get("_cf_chl_opt"); cfOpt != nil {
+		if obj := cfOpt.ToObject(vm); obj != nil {
+			for _, k := range obj.Keys() {
+				val := obj.Get(k)
+				if val != nil && !goja.IsUndefined(val) && !goja.IsNull(val) {
+					result.VmOptions[k] = val.String()
 				}
 			}
 		}

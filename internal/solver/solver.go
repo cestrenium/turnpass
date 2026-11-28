@@ -324,6 +324,7 @@ func (s *Solver) clearFrom(ctx context.Context, pageURL string, opts Options, fe
 
 		// Try the goja-based encoder first (produces correct payload
 		// structure with the real VM-computed key transform).
+		var gojaEncResult *vmexec.EncodePayloadResult
 		if orchResult.EncoderParams.RunnerName != "" && orchResult.EncoderParams.InitialProgram != "" && orchResult.EncoderParams.Encoder != "" {
 			sink.Progress("attempting goja-based payload encoding")
 			encResult, err := vmexec.EncodePayload(
@@ -338,6 +339,7 @@ func (s *Solver) clearFrom(ctx context.Context, pageURL string, opts Options, fe
 			} else if encResult == nil {
 				sink.Progress("warning: goja encoding returned nil result")
 			} else {
+				gojaEncResult = encResult
 				// If the secret was captured, update the encoder params
 				// so the codec fallback uses the correct secret.
 				if encResult.SecretFound {
@@ -374,7 +376,60 @@ func (s *Solver) clearFrom(ctx context.Context, pageURL string, opts Options, fe
 			}
 		}
 
-		// Fall back to the codec-based encoding if goja encoding didn't produce a payload.
+		// Try the AST-based payload template extraction (cfsolve approach).
+		// This evaluates the payload template's field expressions against
+		// _cf_chl_opt options, then encrypts with our Go codec using the
+		// captured secret.
+		// Use the VM-extracted options (which include renamed _hex properties)
+		// if available, otherwise fall back to the HTML values.
+		templateOptions := orchResult.InitialRequest.Options
+		if gojaEncResult != nil && gojaEncResult.VmOptions != nil {
+			templateOptions = gojaEncResult.VmOptions
+		}
+		if orchResult.EncoderParams.HasCoreParams() && orchResult.EncoderParams.Secret != [16]byte{} {
+			sink.Progress("attempting AST-based payload template extraction")
+			plaintextJSON, err := payload.ExtractAndBuild(
+				orchResult.OrchestratorScript,
+				templateOptions,
+			)
+			if err != nil {
+				sink.Progress(fmt.Sprintf("warning: payload template extraction failed: %v", err))
+			} else if plaintextJSON != "" {
+				sink.Progress(fmt.Sprintf("payload template: %d bytes JSON", len(plaintextJSON)))
+				// Create the codec with the captured secret.
+				codecObj, err := codec.NewCodec(
+					orchResult.EncoderParams.Alphabet,
+					orchResult.EncoderParams.Modulus,
+					orchResult.EncoderParams.Secret,
+				)
+				if err != nil {
+					sink.Progress(fmt.Sprintf("warning: could not create codec: %v", err))
+				} else {
+					encoded, err := codecObj.Encode([]byte(plaintextJSON))
+					if err != nil {
+						sink.Progress(fmt.Sprintf("warning: codec encode failed: %v", err))
+					} else {
+						sink.Progress(fmt.Sprintf("codec-encoded payload: %d chars", len(encoded)))
+						postResult, err := PostChallenge(ctx, client, orchResult.InitialRequest,
+							orchResult.PageURL, encoded, StageOrchestrator, sink)
+						if err != nil {
+							sink.Progress(fmt.Sprintf("warning: template POST failed: %v", err))
+						} else {
+							sink.Progress(fmt.Sprintf("template POST result: status=%d, program=%d bytes",
+								postResult.Status, len(postResult.Program)))
+							if len(postResult.Program) > 0 {
+								sink.Artifact("orchestrator-response-program.bin", postResult.Program)
+							}
+							if postResult.Status == 200 {
+								sink.Progress("orchestrator POST succeeded with HTTP 200!")
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Fall back to the simple codec-based encoding.
 		cfChlOpt := orchResult.InitialRequest.Options
 		options := make(map[string]interface{})
 		for k, v := range cfChlOpt {
