@@ -15,7 +15,6 @@ import (
 
 	"github.com/dop251/goja/ast"
 	"github.com/dop251/goja/parser"
-	"github.com/dop251/goja/token"
 
 	"github.com/cestrenium/turnpass/internal/deobfuscate"
 	"github.com/cestrenium/turnpass/internal/expression"
@@ -41,8 +40,9 @@ type TemplateField struct {
 // evaluates each field against the _cf_chl_opt options, and returns the
 // plaintext JSON payload string.
 //
-// cfChlOptValues are the standard-name values from the challenge page HTML
-// (cH, cFPWv, cRay, cUPMDTk, cITimeS).
+// cfChlOptValues are the _cf_chl_opt values. These should include both the
+// standard-name values from the challenge page HTML (cH, cFPWv, cRay, etc.)
+// and the VM-extracted renamed _hex properties (from the goja sandbox).
 // orchestratorJS is the raw (obfuscated) orchestrator source.
 func ExtractAndBuild(orchestratorJS string, cfChlOptValues map[string]string) (string, error) {
 	// Deobfuscate the source first to resolve lazy-init patterns.
@@ -58,7 +58,8 @@ func ExtractAndBuild(orchestratorJS string, cfChlOptValues map[string]string) (s
 		return "", fmt.Errorf("parsing orchestrator: %w", err)
 	}
 
-	// Build the options map by tracking renames.
+	// Build the options map by combining provided values with static
+	// assignments from the orchestrator's bootstrap IIFE.
 	options := buildOptions(prog, cfChlOptValues)
 
 	// Find the payload template.
@@ -93,8 +94,11 @@ func ExtractAndBuild(orchestratorJS string, cfChlOptValues map[string]string) (s
 }
 
 // buildOptions builds the options map by combining HTML values with
-// orchestrator renames. The orchestrator copies standard names (cH, cFPWv,
-// etc.) to obfuscated _hex names and deletes the originals.
+// VM-extracted options. The orchestrator's VM renames standard names
+// (cH, cFPWv, etc.) to obfuscated _hex names. The VM-extracted options
+// (from the goja sandbox) include these renamed properties.
+// We merge both: HTML values provide the standard names, VM options
+// provide the renamed _hex names.
 func buildOptions(prog *ast.Program, cfChlOptValues map[string]string) expression.Options {
 	options := make(expression.Options)
 
@@ -103,52 +107,77 @@ func buildOptions(prog *ast.Program, cfChlOptValues map[string]string) expressio
 		options[k] = js.String(v)
 	}
 
-	// Track renames: _cf_chl_opt._newname = _cf_chl_opt._oldname
-	// combined with: delete _cf_chl_opt._oldname
-	type rename struct {
-		to, from string
-	}
-	var renames []rename
-	var deleted []string
-
+	// Also track static assignments in the orchestrator's bootstrap IIFE.
+	// These include _cf_chl_opt._hexname = "challenges.cloudflare.com"
+	// and _cf_chl_opt._hexname = {object} assignments.
 	walkAST(prog, func(node ast.Node) bool {
-		// Assignment: _cf_chl_opt.X = _cf_chl_opt.Y
 		if ae, ok := node.(*ast.AssignExpression); ok {
-			to := optionAssignment(ae.Left)
-			if to != "" {
-				from := optionKey(ae.Right)
-				if from != "" {
-					renames = append(renames, rename{to, from})
+			// Check for: _cf_chl_opt._hexname = value
+			if de, ok := ae.Left.(*ast.DotExpression); ok {
+				if isCfChlOpt(de.Left) {
+					key := string(de.Identifier.Name)
+					val := evalStatic(ae.Right, options)
+					if val != nil {
+						options[key] = val
+					}
 				}
 			}
-		}
-		// Delete: delete _cf_chl_opt.X
-		if ue, ok := node.(*ast.UnaryExpression); ok && ue.Operator == token.DELETE {
-			opt := optionKey(ue.Operand)
-			if opt != "" {
-				deleted = append(deleted, opt)
+			// Check for: _cf_chl_opt['_hexname'] = value
+			if be, ok := ae.Left.(*ast.BracketExpression); ok {
+				if isCfChlOpt(be.Left) {
+					key := staticStr(be.Member)
+					if key != "" {
+						val := evalStatic(ae.Right, options)
+						if val != nil {
+							options[key] = val
+						}
+					}
+				}
 			}
 		}
 		return true
 	})
 
-	// Apply renames: move values from old names to new names.
-	deletedSet := make(map[string]bool)
-	for _, d := range deleted {
-		deletedSet[d] = true
-	}
-	for _, r := range renames {
-		if deletedSet[r.from] {
-			if val, ok := options[r.from]; ok {
-				if _, exists := options[r.to]; !exists {
-					options[r.to] = val
-					delete(options, r.from)
-				}
-			}
+	return options
+}
+
+// evalStatic tries to evaluate a simple static expression to a js.Value.
+// Handles string literals, numbers, booleans, null, and simple objects.
+func evalStatic(expr ast.Expression, options expression.Options) js.Value {
+	switch v := expr.(type) {
+	case *ast.StringLiteral:
+		return js.String(string(v.Value))
+	case *ast.TemplateLiteral:
+		if len(v.Expressions) == 0 && len(v.Elements) == 1 {
+			return js.String(v.Elements[0].Literal)
+		}
+	case *ast.NumberLiteral:
+		return js.Number(numToFloat(v))
+	case *ast.BooleanLiteral:
+		return js.Bool(v.Value)
+	case *ast.NullLiteral:
+		return js.Null{}
+	case *ast.Identifier:
+		if string(v.Name) == "false" {
+			return js.Bool(false)
+		}
+		if string(v.Name) == "true" {
+			return js.Bool(true)
 		}
 	}
+	return nil
+}
 
-	return options
+func numToFloat(n *ast.NumberLiteral) float64 {
+	switch v := n.Value.(type) {
+	case float64:
+		return v
+	case int64:
+		return float64(v)
+	case int:
+		return float64(v)
+	}
+	return 0
 }
 
 // findPayloadTemplate finds the ObjectExpression that is the payload template.

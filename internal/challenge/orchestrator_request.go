@@ -115,39 +115,32 @@ func ExtractOrchestratorRequest(deobfuscatedSource, pageURL string) (*InitialReq
 	return req, nil
 }
 
-// ExtractCfChlOptValues extracts known _cf_chl_opt values from the
-// challenge page HTML. These are used to build the orchestrator POST URL.
+// ExtractCfChlOptValues extracts ALL _cf_chl_opt values from the
+// challenge page HTML. These include standard names (cH, cFPWv, cRay,
+// cUPMDTk, cITimeS) and additional values (cType, cN, cTplC, cTplO,
+// cTplV, cvId, cZone, fa, md, mdrd). All are used to build the payload.
 func ExtractCfChlOptValues(html string) map[string]string {
 	values := make(map[string]string)
 
-	// cH = cf-chl token
-	rx := regexp.MustCompile(`cH\s*:\s*['"]([^'"]+)['"]`)
-	if m := rx.FindStringSubmatch(html); len(m) >= 2 {
-		values["cH"] = m[1]
+	// Extract ALL key:value pairs from the _cf_chl_opt object.
+	// Pattern: key: "value" or key: 'value' or key: number
+	rx := regexp.MustCompile(`(\w+)\s*:\s*['"]([^'"]+)['"]`)
+	for _, m := range rx.FindAllStringSubmatch(html, -1) {
+		// Only keep keys that look like _cf_chl_opt properties.
+		// The _cf_chl_opt object has short keys like cH, cFPWv, etc.
+		key := m[1]
+		val := m[2]
+		if len(key) <= 10 && len(val) > 0 {
+			values[key] = val
+		}
 	}
 
-	// cFPWv = variant
-	rx = regexp.MustCompile(`cFPWv\s*:\s*['"]([^'"]+)['"]`)
-	if m := rx.FindStringSubmatch(html); len(m) >= 2 {
-		values["cFPWv"] = m[1]
-	}
-
-	// cRay = ray
-	rx = regexp.MustCompile(`cRay\s*:\s*['"]([^'"]+)['"]`)
-	if m := rx.FindStringSubmatch(html); len(m) >= 2 {
-		values["cRay"] = m[1]
-	}
-
-	// cUPMDTk = answered URL
-	rx = regexp.MustCompile(`cUPMDTk\s*:\s*['"]([^'"]+)['"]`)
-	if m := rx.FindStringSubmatch(html); len(m) >= 2 {
-		values["cUPMDTk"] = m[1]
-	}
-
-	// cITimeS = timestamp
-	rx = regexp.MustCompile(`cITimeS\s*:\s*['"]([^'"]+)['"]`)
-	if m := rx.FindStringSubmatch(html); len(m) >= 2 {
-		values["cITimeS"] = m[1]
+	// Also extract numeric values (cTplC:0, cTplO:0, cTplV:5, cvId:3)
+	rxNum := regexp.MustCompile(`(c\w+)\s*:\s*(\d+)`)
+	for _, m := range rxNum.FindAllStringSubmatch(html, -1) {
+		if _, exists := values[m[1]]; !exists {
+			values[m[1]] = m[2]
+		}
 	}
 
 	return values
