@@ -337,31 +337,40 @@ func (s *Solver) clearFrom(ctx context.Context, pageURL string, opts Options, fe
 				sink.Progress(fmt.Sprintf("warning: goja encoding failed: %v", err))
 			} else if encResult == nil {
 				sink.Progress("warning: goja encoding returned nil result")
-			} else if encResult.EncodedPayload != "" {
-				sink.Progress(fmt.Sprintf("goja-encoded payload: %d chars", len(encResult.EncodedPayload)))
-
-				// POST the goja-encoded payload.
-				postResult, err := PostChallenge(ctx, client, orchResult.InitialRequest,
-					orchResult.PageURL, encResult.EncodedPayload, StageOrchestrator, sink)
-				if err != nil {
-					sink.Progress(fmt.Sprintf("warning: orchestrator POST failed: %v", err))
-				} else {
-					sink.Progress(fmt.Sprintf("orchestrator POST result: status=%d, program=%d bytes",
-						postResult.Status, len(postResult.Program)))
-					if len(postResult.Program) > 0 {
-						sink.Artifact("orchestrator-response-program.bin", postResult.Program)
-					}
-					if postResult.Status == 200 {
-						sink.Progress("orchestrator POST succeeded with HTTP 200!")
-					}
-				}
 			} else {
-				encDebug := ""
-				if encResult.EncoderCallResult != "" {
-					encDebug = fmt.Sprintf(", encoderCall=%s", truncateStr(encResult.EncoderCallResult, 200))
+				// If the secret was captured, update the encoder params
+				// so the codec fallback uses the correct secret.
+				if encResult.SecretFound {
+					sink.Progress(fmt.Sprintf("captured secret: %x (%q)", encResult.Secret, string(encResult.Secret[:])))
+					orchResult.EncoderParams.Secret = encResult.Secret
 				}
-				sink.Progress(fmt.Sprintf("warning: goja encoding produced empty payload (keyTransform=%q, error=%v%s)",
-					encResult.KeyTransformFunction, encResult.Error, encDebug))
+
+				if encResult.EncodedPayload != "" {
+					sink.Progress(fmt.Sprintf("goja-encoded payload: %d chars", len(encResult.EncodedPayload)))
+
+					// POST the goja-encoded payload.
+					postResult, err := PostChallenge(ctx, client, orchResult.InitialRequest,
+						orchResult.PageURL, encResult.EncodedPayload, StageOrchestrator, sink)
+					if err != nil {
+						sink.Progress(fmt.Sprintf("warning: orchestrator POST failed: %v", err))
+					} else {
+						sink.Progress(fmt.Sprintf("orchestrator POST result: status=%d, program=%d bytes",
+							postResult.Status, len(postResult.Program)))
+						if len(postResult.Program) > 0 {
+							sink.Artifact("orchestrator-response-program.bin", postResult.Program)
+						}
+						if postResult.Status == 200 {
+							sink.Progress("orchestrator POST succeeded with HTTP 200!")
+						}
+					}
+				} else {
+					encDebug := ""
+					if encResult.EncoderCallResult != "" {
+						encDebug = fmt.Sprintf(", encoderCall=%s", truncateStr(encResult.EncoderCallResult, 200))
+					}
+					sink.Progress(fmt.Sprintf("warning: goja encoding produced empty payload (keyTransform=%q, error=%v%s)",
+						encResult.KeyTransformFunction, encResult.Error, encDebug))
+				}
 			}
 		}
 

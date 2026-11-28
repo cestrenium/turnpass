@@ -103,7 +103,9 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
 	vm := goja.New()
 	windowObj := setupSandbox(vm, cfChlOptValues)
 
-	// Hook XMLHttpRequest.send to capture the payload.
+	// Hook the XHR send to capture payloads. We do NOT hook charCodeAt
+	// here — it's installed later, right before the encoder call, to
+	// avoid interfering with the orchestrator loading.
 	vm.RunString(`
                 window.__captured_payload = null;
                 var origXHROpen = XMLHttpRequest.prototype.open;
@@ -213,6 +215,22 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
 		result.KeyTransformFunction = resVal.String()
 	}
 
+	// Install the charCodeAt hook NOW — after the orchestrator loaded
+	// and the runner was called, but before any encoder calls. This
+	// captures 16-char strings accessed via charCodeAt during the
+	// encoder calls (the key transform reads the secret this way).
+	// Installing it here avoids interfering with the orchestrator loading.
+	vm.RunString(`
+                window.__captured_strings = [];
+                var origCharCodeAt = String.prototype.charCodeAt;
+                String.prototype.charCodeAt = function(idx) {
+                        if (this.length == 16) {
+                                window.__captured_strings.push(String(this));
+                        }
+                        return origCharCodeAt.call(this, idx);
+                };
+        `)
+
 	// Check if the XHR hook captured a payload during the orchestrator load
 	// or the runner call. The orchestrator's IIFE may call send() as part
 	// of its initialization.
@@ -308,6 +326,7 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
 	// (only if it was exposed via source modification).
 	if result.EncodedPayload == "" {
 		if encVal := windowObj.Get("__encoder"); encVal != nil && !goja.IsUndefined(encVal) && !goja.IsNull(encVal) {
+			// The charCodeAt hook is already installed (after the runner call).
 			// Try calling the encoder. The encoder may:
 			// 1. Return the encoded payload string
 			// 2. Throw the encoded payload (using throw for control flow)
@@ -325,6 +344,7 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
                                         JSON.stringify({type: 'throw', value: String(e), length: String(e).length, name: e.name, message: e.message});
                                 }
                         `)
+
 			if encResult != nil {
 				s := encResult.String()
 				// If the thrown value is long enough, it's likely the payload.
@@ -338,6 +358,52 @@ func EncodePayload(orchestratorJS, runnerName, initialProgram, encoderName strin
 			if result.EncodedPayload == "" {
 				if payloadVal := windowObj.Get("__captured_payload"); payloadVal != nil && !goja.IsUndefined(payloadVal) && !goja.IsNull(payloadVal) {
 					result.EncodedPayload = payloadVal.String()
+				}
+			}
+		}
+	}
+
+	// Extract the 16-byte secret from captured charCodeAt calls.
+	// The key transform reads the secret using charCodeAt(index), so any
+	// 16-char string accessed via charCodeAt during the encoder call is
+	// a candidate. We filter for:
+	// - Printable ASCII (32-126) — the secret is a string constant
+	// - Not the ray token (also 16 chars)
+	// - Not a known _cf_chl_opt value
+	if caps := windowObj.Get("__captured_strings"); caps != nil {
+		if arr := caps.ToObject(vm); arr != nil {
+			seen := make(map[string]bool)
+			for _, k := range arr.Keys() {
+				s := arr.Get(k).String()
+				if len(s) != 16 || seen[s] {
+					continue
+				}
+				seen[s] = true
+				// Must be all printable ASCII.
+				allPrintable := true
+				for i := 0; i < len(s); i++ {
+					if s[i] < 32 || s[i] > 126 {
+						allPrintable = false
+						break
+					}
+				}
+				if !allPrintable {
+					continue
+				}
+				// Skip known _cf_chl_opt values (like the ray token).
+				isKnown := false
+				for _, v := range cfChlOptValues {
+					if v == s {
+						isKnown = true
+						break
+					}
+				}
+				if isKnown {
+					continue
+				}
+				if !result.SecretFound {
+					copy(result.Secret[:], s)
+					result.SecretFound = true
 				}
 			}
 		}
